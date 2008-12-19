@@ -30,6 +30,7 @@ from util import tests as util_tests
 from widgets import tests as widgets_tests
 from formsets import tests as formset_tests
 from media import media_tests
+from warnings import tests as warning_tests
 
 __test__ = {
     'extra_tests': extra_tests,
@@ -63,6 +64,7 @@ __test__ = {
     'media_tests': media_tests,
     'util_tests': util_tests,
     'widgets_tests': widgets_tests,
+    'warning_tests': warning_tests,
 }
 
 if __name__ == "__main__":

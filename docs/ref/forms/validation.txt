@@ -303,3 +303,32 @@ dictionary if there are any errors in the form. However, this behaviour may
 change in the future, so it's not a bad idea to clean up after yourself in the
 first place.
 
+
+Validation Warnings
+===================
+
+In addition to raising ValidationErrors you can also use Validation Warnings.  
+These are things you want to bring to the user's attention, but they don't 
+actually indicate that the input is invalid.
+
+In order to send a validation warning, you need to add an extra argument to your
+clean function, this argument is a callable that sends a warning.
+
+For example, if we have a form with an ``IntegerField``, and we want to remind 
+the user that the value may be too small, but still allow it we could right a 
+validation method that looks like::
+
+    from django.core.warnings import warn
+    def clean_value(self, warn):
+        p = self.cleaned_data['value']
+        if p < 10:
+            warn("That's a pretty small value.")
+        return p
+
+If a user enters a value under 10 they will be warned, but by default the 
+form will still be valid.  Since there are cases where you might want a warning 
+to invalidate a form a form's ``is_valid()`` method takes a single boolean 
+argument that determines whether or not warnings should impact whether or not a 
+form is valid, by default it is False.  This allows you to have behavior such as 
+displaying a form with warnings once, but when it's resubmitted allowing any 
+warnings.

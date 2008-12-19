@@ -66,3 +66,28 @@ class ValidationError(Exception):
         # AttributeError: ValidationError instance has no attribute 'args'
         # See http://www.python.org/doc/current/tut/node10.html#handling
         return repr(self.messages)
+
+class WarningDict(ErrorDict):
+    """
+    A collection of warnings that knows how to display itself in various formats.
+
+    The dictionary keys are the field names, and the values are the warnings.
+    """
+    def as_ul(self):
+        if not self:
+            return u''
+        return mark_safe(u'<ul class="warninglist">%s</ul>' % 
+            ''.join([u'<li>%s%s</li>' % (k, force_unicode(v))
+            for k, v in self.items()]))
+
+
+class WarningList(ErrorList):
+    """
+    A collection of warnings that knows how to display itself in various formats. 
+    """
+    def as_ul(self):
+        if not self:
+            return u''
+        return mark_safe(u'<ul class="warninglist">%s</ul>' % 
+            ''.join([u'<li>%s</li>' % conditional_escape(force_unicode(e))
+            for e in self]))
