@@ -41,6 +41,15 @@ function showRelatedObjectLookupPopup(triggeringLink) {
     return false;
 }
 
+function showGenericRelatedObjectLookupPopup(ct_select, triggering_link, url_base) {
+    var url = content_types[ct_select.options[ct_select.selectedIndex].value];
+    if (url != undefined) {
+        triggering_link.href = url_base + url;
+        return showRelatedObjectLookupPopup(triggering_link);
+    }
+    return false;
+}
+
 function dismissRelatedLookupPopup(win, chosenId) {
     var name = windowname_to_id(win.name);
     var elem = document.getElementById(name);

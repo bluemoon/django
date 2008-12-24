@@ -63,6 +63,13 @@ class BaseModelAdmin(object):
             else:
                 # Otherwise, use the default select widget.
                 return db_field.formfield(**kwargs)
+        
+        # For generic foreign keys marked as generic_fields we use a special widget
+        if db_field.name in [f.fk_field for f in self.model._meta.virtual_fields if f.name in self.generic_fields]:
+            for gfk in self.model._meta.virtual_fields:
+                if gfk.fk_field == db_field.name:
+                    break
+            return db_field.formfield(widget=widgets.GenericForeignKeyRawIdWidget(gfk.ct_field, self.admin_site._registry.keys()))
 
         # For DateTimeFields, use a special field and widget.
         if isinstance(db_field, models.DateTimeField):
