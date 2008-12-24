@@ -69,7 +69,7 @@ class BaseModelAdmin(object):
             for gfk in self.model._meta.virtual_fields:
                 if gfk.fk_field == db_field.name:
                     break
-            return db_field.formfield(widget=widgets.GenericForeignKeyRawIdWidget(gfk.ct_field, self.admin_site._registry.keys()))
+            return db_field.formfield(label=capfirst(gfk.name.replace('_', ' ')), widget=widgets.GenericForeignKeyRawIdWidget(gfk.ct_field, self.admin_site._registry.keys()))
 
         # For DateTimeFields, use a special field and widget.
         if isinstance(db_field, models.DateTimeField):
