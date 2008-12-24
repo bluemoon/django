@@ -238,6 +238,12 @@ list of fields that should be displayed as a horizontal filter interface. See
 Same as ``filter_horizontal``, but is a vertical display of the filter
 interface.
 
+``generic_fields``
+~~~~~~~~~~~~~~~~~~
+
+This is a list of ``GenericForeignKeys`` that will have an interface similar to 
+that of ``raw_id_fields``.
+
 ``list_display``
 ~~~~~~~~~~~~~~~~
 
