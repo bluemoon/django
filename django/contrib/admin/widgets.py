@@ -305,7 +305,8 @@ class GenericForeignKeyRawIdWidget(ForeignKeyRawIdWidget):
             output.append(self.label_for_value(value))
         
         from django.contrib.contenttypes.models import ContentType
-        content_types = """<script type="text/javascript">
+        content_types = """
+        <script type="text/javascript">
         var content_types = new Array();
         %s
         </script>

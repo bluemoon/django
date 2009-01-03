@@ -2,6 +2,8 @@
 from django.conf import settings
 from django.db import models
 from django.core.files.storage import default_storage
+from django.contrib.contenttypes import generic
+from django.contrib.contenttypes.models import ContentType
 
 class Member(models.Model):
     name = models.CharField(max_length=100)
@@ -41,6 +43,17 @@ class Inventory(models.Model):
    def __unicode__(self):
       return self.name
 
+class Image(models.Model):
+    image = models.ImageField(upload_to='images')
+    description = models.CharField(max_length=200)
+
+    content_type = models.ForeignKey(ContentType)
+    object_id = models.PositiveIntegerField()
+    object = generic.GenericForeignKey('content_type', 'object_id')
+    
+    def __unicode__(self):
+        return u"%s - %s" % (self.image.name, self.description[:100])
+
 __test__ = {'WIDGETS_TESTS': """
 >>> from datetime import datetime
 >>> from django.utils.html import escape, conditional_escape
@@ -48,6 +61,7 @@ __test__ = {'WIDGETS_TESTS': """
 >>> from django.contrib.admin.widgets import FilteredSelectMultiple, AdminSplitDateTime
 >>> from django.contrib.admin.widgets import AdminFileWidget, ForeignKeyRawIdWidget, ManyToManyRawIdWidget
 >>> from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
+>>> from django.contrib.admin.widgets import GenericForeignKeyRawIdWidget
 
 Calling conditional_escape on the output of widget.render will simulate what
 happens in the template. This is easier than setting up a template and context
@@ -116,6 +130,23 @@ True
 >>> child_of_hidden = Inventory.objects.create(barcode=94, name='Child of hidden', parent=hidden)
 >>> print w.render('test', child_of_hidden.parent_id, attrs={}) 
 <input type="text" name="test" value="93" class="vForeignKeyRawIdAdminField" /><a href="../../../admin_widgets/inventory/?t=barcode" class="related-lookup" id="lookup_id_test" onclick="return showRelatedObjectLookupPopup(this);"> <img src="%(ADMIN_MEDIA_PREFIX)simg/admin/selector-search.gif" width="16" height="16" alt="Lookup" /></a>&nbsp;<strong>Hidden</strong>
+
+>>> print GenericForeignKeyRawIdWidget(Image._meta.virtual_fields[0].ct_field).render('test', '', {})
+    <input type="text" name="test" class="vForeignKeyRawIdAdminField" />
+                <a href="../../../" class="related-lookup" id="lookup_id_test" onclick="return showGenericRelatedObjectLookupPopup(document.getElementById('id_content_type'), this, '../../../');"> <img src="%(ADMIN_MEDIA_PREFIX)simg/admin/selector-search.gif" width="16" height="16" alt="Lookup" /></a>
+            <script type="text/javascript">
+            var content_types = new Array();
+            </script>
+
+>>> print GenericForeignKeyRawIdWidget(Image._meta.virtual_fields[0].ct_field, [x.model_class() for x in ContentType.objects.filter(pk__lt=3)]).render('test', '', {})
+<input type="text" name="test" class="vForeignKeyRawIdAdminField" />
+            <a href="../../../" class="related-lookup" id="lookup_id_test" onclick="return showGenericRelatedObjectLookupPopup(document.getElementById('id_content_type'), this, '../../../');"> <img src="%(ADMIN_MEDIA_PREFIX)simg/admin/selector-search.gif" width="16" height="16" alt="Lookup" /></a>
+    <script type="text/javascript">
+    var content_types = new Array();
+        content_types[1] = 'contenttypes/contenttype/';
+content_types[2] = 'auth/permission/';
+    </script>
+    
 """ % {
     'ADMIN_MEDIA_PREFIX': settings.ADMIN_MEDIA_PREFIX,
     'STORAGE_URL': default_storage.url(''),
