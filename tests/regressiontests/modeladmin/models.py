@@ -3,6 +3,8 @@ from datetime import date
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.contrib.contenttypes import generic
+from django.contrib.contenttypes.models import ContentType
 
 class Band(models.Model):
     name = models.CharField(max_length=100)
@@ -34,6 +36,15 @@ class ValidationTestModel(models.Model):
 
 class ValidationTestInlineModel(models.Model):
     parent = models.ForeignKey(ValidationTestModel)
+
+class Image(models.Model):
+    image = models.ImageField(upload_to='pictures')
+    description = models.TextField()
+    
+    content_type = models.ForeignKey(ContentType)
+    object_id = models.PositiveIntegerField()
+    object = generic.GenericForeignKey('content_type', 'object_id')
+
 
 __test__ = {'API_TESTS': """
 
@@ -911,6 +922,23 @@ ImproperlyConfigured: 'ValidationTestInline.formset' does not inherit from BaseM
 >>> class ValidationTestModelAdmin(ModelAdmin):
 ...     inlines = [ValidationTestInline]
 >>> validate(ValidationTestModelAdmin, ValidationTestModel)
+
+>>> class GenericModelAdmin(ModelAdmin):
+...     generic_fields = None
+>>> validate(GenericModelAdmin, Image)
+Traceback (most recent call last):
+...
+ImproperlyConfigured: 'GenericModelAdmin.generic_fields' must be a list or tuple.
+>>> class GenericModelAdmin(ModelAdmin):
+...     generic_fields = ["abc"]
+>>> validate(GenericModelAdmin, Image)
+Traceback (most recent call last):
+...
+ImproperlyConfigured: Item number 0 in GenericModelAdmin.generic_fieldsis not a GenericForeignKey on Image
+
+>>> class GenericModelAdmin(ModelAdmin):
+...     generic_fields = ["object"]
+>>> validate(GenericModelAdmin, Image)
 
 """
 }

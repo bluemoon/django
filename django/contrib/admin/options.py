@@ -38,6 +38,7 @@ class BaseModelAdmin(object):
     filter_horizontal = ()
     radio_fields = {}
     prepopulated_fields = {}
+    generic_fields = ()
 
     def formfield_for_dbfield(self, db_field, **kwargs):
         """

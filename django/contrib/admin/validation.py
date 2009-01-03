@@ -102,6 +102,14 @@ def validate(cls, model):
         if not isinstance(getattr(cls, attr), bool):
             raise ImproperlyConfigured("'%s.%s' should be a boolean."
                     % (cls.__name__, attr))
+    
+    if hasattr(cls, 'generic_fields'):
+        check_isseq(cls, 'generic_fields', cls.generic_fields)
+        for i, field in enumerate(cls.generic_fields):
+            if field not in [f.name for f in model._meta.virtual_fields]:
+                raise ImproperlyConfigured("Item number %d in %s.generic_fields" \
+                    "is not a GenericForeignKey on %s" % (i, cls.__name__, 
+                    model.__name__))
 
     # inlines = []
     if hasattr(cls, 'inlines'):
