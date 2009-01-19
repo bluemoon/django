@@ -50,7 +50,7 @@ class Image(models.Model):
     image = models.ImageField(upload_to='images')
     description = models.CharField(max_length=200)
 
-    content_type = models.ForeignKey(ContentType)
+    content_type = models.ForeignKey(ContentType, related_name="widget_image_set")
     object_id = models.PositiveIntegerField()
     object = generic.GenericForeignKey('content_type', 'object_id')
     

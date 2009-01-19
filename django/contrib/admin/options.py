@@ -104,9 +104,9 @@ class BaseModelAdmin(object):
 
             return formfield
         
-        if db_field.name in [f.fk_field for f in self.model_meta.virtual_fields
+        if db_field.name in [f.fk_field for f in self.model._meta.virtual_fields
             if f.name in self.generic_fields]:
-            for gfk in self.model_meta.virtual_fields:
+            for gfk in self.model._meta.virtual_fields:
                 if gfk.fk_field == db_field.name:
                     return db_field.formfield(
                         widget=widgets.GenericForeignKeyRawIdWidget(

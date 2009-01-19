@@ -100,7 +100,7 @@ class AdminFormfieldForDBFieldTests(TestCase):
     
     def testGenericField(self):
         self.assertFormfield(models.Image, 'object_id', 
-            widgets.GenericForeignKeyRawIdWidget, generic_fields=('object',)
+            widgets.GenericForeignKeyRawIdWidget, generic_fields=('object',))
 
 
 class AdminFormfieldForDBFieldWithRequestTests(DjangoTestCase):
