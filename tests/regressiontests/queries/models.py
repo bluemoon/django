@@ -1015,6 +1015,35 @@ performance problems on backends like MySQL.
 >>> Annotation.objects.filter(notes__in=Note.objects.filter(note="n1"))
 [<Annotation: a1>]
 
+Nested queries should not evaluate the inner query as part of constructing the
+SQL. This test verifies this: if the inner query is evaluated, the outer "in"
+lookup will raise an EmptyResultSet exception (as the inner query returns
+nothing).
+>>> print Annotation.objects.filter(notes__in=Note.objects.filter(note="xyzzy")).query
+SELECT ...
+
+Bug #9997 -- If a ValuesList or Values queryset is passed as an inner query, we
+make sure it's only requesting a single value and use that as the thing to
+select.
+>>> Tag.objects.filter(name__in=Tag.objects.filter(parent=t1).values('name'))
+[<Tag: t2>, <Tag: t3>]
+
+# Multi-valued values() and values_list() querysets should raise errors.
+>>> Tag.objects.filter(name__in=Tag.objects.filter(parent=t1).values('name', 'id'))
+Traceback (most recent call last):
+...
+TypeError: Cannot use a multi-field ValuesQuerySet as a filter value.
+>>> Tag.objects.filter(name__in=Tag.objects.filter(parent=t1).values_list('name', 'id'))
+Traceback (most recent call last):
+...
+TypeError: Cannot use a multi-field ValuesListQuerySet as a filter value.
+
+Bug #9985 -- qs.values_list(...).values(...) combinations should work.
+>>> Note.objects.values_list("note", flat=True).values("id").order_by("id")
+[{'id': 1}, {'id': 2}, {'id': 3}]
+>>> Annotation.objects.filter(notes__in=Note.objects.filter(note="n1").values_list('note').values('id'))
+[<Annotation: a1>]
+
 """}
 
 # In Python 2.3 and the Python 2.6 beta releases, exceptions raised in __len__
