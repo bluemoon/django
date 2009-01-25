@@ -147,6 +147,37 @@ FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, id, i
 >>> Book.objects.aggregate(number=Max('pages'), select=Max('pages'))
 {'number': 1132, 'select': 1132}
 
+# Regression for #10064: select_related() plays nice with aggregates
+>>> Book.objects.select_related('publisher').annotate(num_authors=Count('authors')).values()[0]
+{'rating': 4.0, 'isbn': u'013790395', 'name': u'Artificial Intelligence: A Modern Approach', 'pubdate': datetime.date(1995, 1, 15), 'price': Decimal("82.8..."), 'id': 5, 'num_authors': 2, 'publisher_id': 3, 'pages': 1132}
+
+# Regression for #10010: exclude on an aggregate field is correctly negated
+>>> len(Book.objects.annotate(num_authors=Count('authors')))
+6
+>>> len(Book.objects.annotate(num_authors=Count('authors')).filter(num_authors__gt=2))
+1
+>>> len(Book.objects.annotate(num_authors=Count('authors')).exclude(num_authors__gt=2))
+5
+
+>>> len(Book.objects.annotate(num_authors=Count('authors')).filter(num_authors__lt=3).exclude(num_authors__lt=2))
+2
+>>> len(Book.objects.annotate(num_authors=Count('authors')).exclude(num_authors__lt=2).filter(num_authors__lt=3))
+2
+
+# Regression for #10089: Check handling of empty result sets with aggregates
+>>> Book.objects.filter(id__in=[]).count()
+0
+
+>>> Book.objects.filter(id__in=[]).aggregate(num_authors=Count('authors'), avg_authors=Avg('authors'), max_authors=Max('authors'), max_price=Max('price'), max_rating=Max('rating'))
+{'max_authors': None, 'max_rating': None, 'num_authors': 0, 'avg_authors': None, 'max_price': None}
+
+>>> Publisher.objects.filter(pk=5).annotate(num_authors=Count('book__authors'), avg_authors=Avg('book__authors'), max_authors=Max('book__authors'), max_price=Max('book__price'), max_rating=Max('book__rating')).values()
+[{'max_authors': None, 'name': u"Jonno's House of Books", 'num_awards': 0, 'max_price': None, 'num_authors': 0, 'max_rating': None, 'id': 5, 'avg_authors': None}]
+
+# Regression for #10113 - Fields mentioned in order_by() must be included in the GROUP BY.
+# This only becomes a problem when the order_by introduces a new join.
+>>> Book.objects.annotate(num_authors=Count('authors')).order_by('publisher__name', 'name')
+[<Book: Practical Django Projects>, <Book: The Definitive Guide to Django: Web Development Done Right>, <Book: Paradigms of Artificial Intelligence Programming: Case Studies in Common Lisp>, <Book: Artificial Intelligence: A Modern Approach>, <Book: Python Web Development with Django>, <Book: Sams Teach Yourself Django in 24 Hours>]
 
 """
 }
