@@ -193,6 +193,17 @@ Extra fields.
 >>> CategoryForm.base_fields.keys()
 ['name', 'slug', 'url', 'some_extra_field']
 
+Extra field that has a name collision with a related object accessor.
+
+>>> class WriterForm(ModelForm):
+...     book = forms.CharField(required=False)
+...
+...     class Meta:
+...         model = Writer
+
+>>> wf = WriterForm({'name': 'Richard Lockridge'})
+>>> wf.is_valid()
+True
 
 Replacing a field.
 
@@ -1274,8 +1285,8 @@ True
 >>> form = ExplicitPKForm({'key': u'key1', 'desc': u''})
 >>> form.is_valid()
 False
->>> form.errors
-{'__all__': [u'Explicit pk with this Key and Desc already exists.'], 'key': [u'Explicit pk with this Key already exists.'], 'desc': [u'Explicit pk with this Desc already exists.']}
+>>> sorted(form.errors.items())
+[('__all__', [u'Explicit pk with this Key and Desc already exists.']), ('desc', [u'Explicit pk with this Desc already exists.']), ('key', [u'Explicit pk with this Key already exists.'])]
 
 # Choices on CharField and IntegerField
 >>> class ArticleForm(ModelForm):

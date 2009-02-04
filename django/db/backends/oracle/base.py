@@ -7,6 +7,10 @@ Requires cx_Oracle: http://cx-oracle.sourceforge.net/
 import os
 import datetime
 import time
+try:
+    from decimal import Decimal
+except ImportError:
+    from django.utils._decimal import Decimal
 
 # Oracle takes client-side character set encoding from the environment.
 os.environ['NLS_LANG'] = '.UTF8'
@@ -245,27 +249,27 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     def _valid_connection(self):
         return self.connection is not None
 
+    def _connect_string(self, settings):
+        if len(settings.DATABASE_HOST.strip()) == 0:
+            settings.DATABASE_HOST = 'localhost'
+        if len(settings.DATABASE_PORT.strip()) != 0:
+            dsn = Database.makedsn(settings.DATABASE_HOST,
+                                   int(settings.DATABASE_PORT),
+                                   settings.DATABASE_NAME)
+        else:
+            dsn = settings.DATABASE_NAME
+        return "%s/%s@%s" % (settings.DATABASE_USER,
+                             settings.DATABASE_PASSWORD, dsn)
+
     def _cursor(self, settings):
         cursor = None
         if not self._valid_connection():
-            if len(settings.DATABASE_HOST.strip()) == 0:
-                settings.DATABASE_HOST = 'localhost'
-            if len(settings.DATABASE_PORT.strip()) != 0:
-                dsn = Database.makedsn(settings.DATABASE_HOST,
-                                       int(settings.DATABASE_PORT),
-                                       settings.DATABASE_NAME)
-                self.connection = Database.connect(settings.DATABASE_USER,
-                                                   settings.DATABASE_PASSWORD,
-                                                   dsn, **self.options)
-            else:
-                conn_string = "%s/%s@%s" % (settings.DATABASE_USER,
-                                            settings.DATABASE_PASSWORD,
-                                            settings.DATABASE_NAME)
-                self.connection = Database.connect(conn_string, **self.options)
+            conn_string = self._connect_string(settings)
+            self.connection = Database.connect(conn_string, **self.options)
             cursor = FormatStylePlaceholderCursor(self.connection)
             # Set oracle date to ansi date format.  This only needs to execute
             # once when we create a new connection.
-            cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD' "
+            cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS' "
                            "NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS.FF'")
             try:
                 self.oracle_version = int(self.connection.version.split('.')[0])
@@ -287,8 +291,6 @@ class DatabaseWrapper(BaseDatabaseWrapper):
                 pass
         if not cursor:
             cursor = FormatStylePlaceholderCursor(self.connection)
-        # Default arraysize of 1 is highly sub-optimal.
-        cursor.arraysize = 100
         return cursor
 
 
@@ -314,7 +316,7 @@ class OracleParam(object):
             self.input_size = None
 
 
-class FormatStylePlaceholderCursor(Database.Cursor):
+class FormatStylePlaceholderCursor(object):
     """
     Django uses "format" (e.g. '%s') style placeholders, but Oracle uses ":var"
     style. This fixes it -- but note that if you want to use a literal "%s" in
@@ -324,6 +326,13 @@ class FormatStylePlaceholderCursor(Database.Cursor):
     UTF-8 -- for talking to Oracle -- in here.
     """
     charset = 'utf-8'
+
+    def __init__(self, connection):
+        self.cursor = connection.cursor()
+        # Necessary to retrieve decimal values without rounding error.
+        self.cursor.numbersAsStrings = True
+        # Default arraysize of 1 is highly sub-optimal.
+        self.cursor.arraysize = 100
 
     def _format_params(self, params):
         return tuple([OracleParam(p, self.charset, True) for p in params])
@@ -354,8 +363,7 @@ class FormatStylePlaceholderCursor(Database.Cursor):
         query = smart_str(query, self.charset) % tuple(args)
         self._guess_input_sizes([params])
         try:
-            return Database.Cursor.execute(self, query,
-                                           self._param_generator(params))
+            return self.cursor.execute(query, self._param_generator(params))
         except DatabaseError, e:
             # cx_Oracle <= 4.4.0 wrongly raises a DatabaseError for ORA-01400.
             if e.args[0].code == 1400 and not isinstance(e, IntegrityError):
@@ -378,7 +386,7 @@ class FormatStylePlaceholderCursor(Database.Cursor):
         formatted = [self._format_params(i) for i in params]
         self._guess_input_sizes(formatted)
         try:
-            return Database.Cursor.executemany(self, query,
+            return self.cursor.executemany(query,
                                 [self._param_generator(p) for p in formatted])
         except DatabaseError, e:
             # cx_Oracle <= 4.4.0 wrongly raises a DatabaseError for ORA-01400.
@@ -387,20 +395,68 @@ class FormatStylePlaceholderCursor(Database.Cursor):
             raise e
 
     def fetchone(self):
-        row = Database.Cursor.fetchone(self)
+        row = self.cursor.fetchone()
         if row is None:
             return row
-        return tuple([to_unicode(e) for e in row])
+        return self._rowfactory(row)
 
     def fetchmany(self, size=None):
         if size is None:
             size = self.arraysize
-        return tuple([tuple([to_unicode(e) for e in r])
-                      for r in Database.Cursor.fetchmany(self, size)])
+        return tuple([self._rowfactory(r)
+                      for r in self.cursor.fetchmany(size)])
 
     def fetchall(self):
-        return tuple([tuple([to_unicode(e) for e in r])
-                      for r in Database.Cursor.fetchall(self)])
+        return tuple([self._rowfactory(r)
+                      for r in self.cursor.fetchall()])
+
+    def _rowfactory(self, row):
+        # Cast numeric values as the appropriate Python type based upon the
+        # cursor description, and convert strings to unicode.
+        casted = []
+        for value, desc in zip(row, self.cursor.description):
+            if value is not None and desc[1] is Database.NUMBER:
+                precision, scale = desc[4:6]
+                if scale == -127:
+                    if precision == 0:
+                        # NUMBER column: decimal-precision floating point
+                        # This will normally be an integer from a sequence,
+                        # but it could be a decimal value.
+                        if '.' in value:
+                            value = Decimal(value)
+                        else:
+                            value = int(value)
+                    else:
+                        # FLOAT column: binary-precision floating point.
+                        # This comes from FloatField columns.
+                        value = float(value)
+                elif precision > 0:
+                    # NUMBER(p,s) column: decimal-precision fixed point.
+                    # This comes from IntField and DecimalField columns.
+                    if scale == 0:
+                        value = int(value)
+                    else:
+                        value = Decimal(value)
+                elif '.' in value:
+                    # No type information. This normally comes from a
+                    # mathematical expression in the SELECT list. Guess int
+                    # or Decimal based on whether it has a decimal point.
+                    value = Decimal(value)
+                else:
+                    value = int(value)
+            else:
+                value = to_unicode(value)
+            casted.append(value)
+        return tuple(casted)
+
+    def __getattr__(self, attr):
+        if attr in self.__dict__:
+            return self.__dict__[attr]
+        else:
+            return getattr(self.cursor, attr)
+
+    def __iter__(self):
+        return iter(self.cursor)
 
 
 def to_unicode(s):

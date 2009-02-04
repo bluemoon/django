@@ -56,10 +56,10 @@ def save_instance(form, instance, fields=None, fail_message='saved',
             file_field_list.append(f)
         else:
             f.save_form_data(instance, cleaned_data[f.name])
-            
+
     for f in file_field_list:
         f.save_form_data(instance, cleaned_data[f.name])
-        
+
     # Wrap up the saving of m2m data as a function.
     def save_m2m():
         opts = instance._meta
@@ -224,13 +224,13 @@ class BaseModelForm(BaseForm):
         return self.cleaned_data
 
     def validate_unique(self):
-        from django.db.models.fields import FieldDoesNotExist
+        from django.db.models.fields import FieldDoesNotExist, Field as ModelField
 
-        # Gather a list of checks to perform. We only perform unique checks 
-        # for fields present and not None in cleaned_data.  Since this is a 
-        # ModelForm, some fields may have been excluded; we can't perform a unique 
+        # Gather a list of checks to perform. We only perform unique checks
+        # for fields present and not None in cleaned_data.  Since this is a
+        # ModelForm, some fields may have been excluded; we can't perform a unique
         # check on a form that is missing fields involved in that check.  It also does
-        # not make sense to check data that didn't validate, and since NULL does not 
+        # not make sense to check data that didn't validate, and since NULL does not
         # equal NULL in SQL we should not do any unique checking for NULL values.
         unique_checks = []
         for check in self.instance._meta.unique_together[:]:
@@ -247,6 +247,12 @@ class BaseModelForm(BaseForm):
                 f = self.instance._meta.get_field_by_name(name)[0]
             except FieldDoesNotExist:
                 # This is an extra field that's not on the ModelForm, ignore it
+                continue
+            if not isinstance(f, ModelField):
+                # This is an extra field that happens to have a name that matches, 
+                # for example, a related object accessor for this model.  So 
+                # get_field_by_name found it, but it is not a Field so do not proceed
+                # to use it as if it were.
                 continue
             if f.unique and self.cleaned_data.get(name) is not None:
                 unique_checks.append((name,))
@@ -317,6 +323,8 @@ class BaseModelForm(BaseForm):
         else:
             fail_message = 'changed'
         return save_instance(self, self.instance, self._meta.fields, fail_message, commit)
+
+    save.alters_data = True
 
 class ModelForm(BaseModelForm):
     __metaclass__ = ModelFormMetaclass
@@ -480,11 +488,16 @@ class BaseInlineFormSet(BaseModelFormSet):
             # creating new instances
             form.data[form.add_prefix(self._pk_field.name)] = None
         return form
-    
+
     def save_new(self, form, commit=True):
-        kwargs = {self.fk.get_attname(): self.instance.pk}
+        fk_attname = self.fk.get_attname()
+        kwargs = {fk_attname: self.instance.pk}
         new_obj = self.model(**kwargs)
-        return save_instance(form, new_obj, exclude=[self._pk_field.name], commit=commit)
+        if fk_attname == self._pk_field.attname or self._pk_field.auto_created:
+            exclude =  [self._pk_field.name]
+        else:
+            exclude = []
+        return save_instance(form, new_obj, exclude=exclude, commit=commit)
 
     def add_fields(self, form, index):
         super(BaseInlineFormSet, self).add_fields(form, index)
@@ -580,7 +593,7 @@ class InlineForeignKeyField(Field):
     default_error_messages = {
         'invalid_choice': _(u'The inline foreign key did not match the parent instance primary key.'),
     }
-    
+
     def __init__(self, parent_instance, *args, **kwargs):
         self.parent_instance = parent_instance
         self.pk_field = kwargs.pop("pk_field", False)
@@ -589,7 +602,7 @@ class InlineForeignKeyField(Field):
         kwargs["required"] = False
         kwargs["widget"] = InlineForeignKeyHiddenInput
         super(InlineForeignKeyField, self).__init__(*args, **kwargs)
-    
+
     def clean(self, value):
         if value in EMPTY_VALUES:
             if self.pk_field:

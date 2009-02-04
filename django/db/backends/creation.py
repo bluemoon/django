@@ -47,7 +47,8 @@ class BaseDatabaseCreation(object):
             # Make the definition (e.g. 'foo VARCHAR(30)') for this field.
             field_output = [style.SQL_FIELD(qn(f.column)),
                 style.SQL_COLTYPE(col_type)]
-            field_output.append(style.SQL_KEYWORD('%sNULL' % (not f.null and 'NOT ' or '')))
+            if not f.null:
+                field_output.append(style.SQL_KEYWORD('NOT NULL'))
             if f.primary_key:
                 field_output.append(style.SQL_KEYWORD('PRIMARY KEY'))
             elif f.unique:
@@ -65,8 +66,7 @@ class BaseDatabaseCreation(object):
             table_output.append(' '.join(field_output))
         if opts.order_with_respect_to:
             table_output.append(style.SQL_FIELD(qn('_order')) + ' ' + \
-                style.SQL_COLTYPE(models.IntegerField().db_type()) + ' ' + \
-                style.SQL_KEYWORD('NULL'))
+                style.SQL_COLTYPE(models.IntegerField().db_type()))
         for field_constraints in opts.unique_together:
             table_output.append(style.SQL_KEYWORD('UNIQUE') + ' (%s)' % \
                 ", ".join([style.SQL_FIELD(qn(opts.get_field(f).column)) for f in field_constraints]))
@@ -311,7 +311,8 @@ class BaseDatabaseCreation(object):
 
         self.connection.close()
         settings.DATABASE_NAME = test_database_name
-
+        settings.DATABASE_SUPPORTS_TRANSACTIONS = self._rollback_works()
+        
         call_command('syncdb', verbosity=verbosity, interactive=False)
 
         if settings.CACHE_BACKEND.startswith('db://'):
@@ -362,7 +363,19 @@ class BaseDatabaseCreation(object):
                 sys.exit(1)
 
         return test_database_name
-
+    
+    def _rollback_works(self):
+        cursor = self.connection.cursor()
+        cursor.execute('CREATE TABLE ROLLBACK_TEST (X INT)')
+        self.connection._commit()
+        cursor.execute('INSERT INTO ROLLBACK_TEST (X) VALUES (8)')
+        self.connection._rollback()
+        cursor.execute('SELECT COUNT(X) FROM ROLLBACK_TEST')
+        count, = cursor.fetchone()
+        cursor.execute('DROP TABLE ROLLBACK_TEST')
+        self.connection._commit()
+        return count == 0
+        
     def destroy_test_db(self, old_database_name, verbosity=1):
         """
         Destroy a test database, prompting the user for confirmation if the
