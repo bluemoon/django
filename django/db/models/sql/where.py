@@ -160,10 +160,10 @@ class WhereNode(tree.Node):
             extra = ''
 
         if lookup_type in connection.operators:
-            format = "%s %%s %s" % (connection.ops.lookup_cast(lookup_type),
-                    extra)
+            format = "%s %%s %%s" % (connection.ops.lookup_cast(lookup_type),)
             return (format % (field_sql,
-                    connection.operators[lookup_type] % cast_sql), params)
+                              connection.operators[lookup_type] % cast_sql,
+                              extra), params)
 
         if lookup_type == 'in':
             if not value_annot:
@@ -174,9 +174,9 @@ class WhereNode(tree.Node):
                     params)
         elif lookup_type in ('range', 'year'):
             return ('%s BETWEEN %%s and %%s' % field_sql, params)
-        elif lookup_type in ('month', 'day'):
-            return ('%s = %%s' % connection.ops.date_extract_sql(lookup_type,
-                    field_sql), params)
+        elif lookup_type in ('month', 'day', 'week_day'):
+            return ('%s = %%s' % connection.ops.date_extract_sql(lookup_type, field_sql),
+                    params)
         elif lookup_type == 'isnull':
             return ('%s IS %sNULL' % (field_sql,
                 (not value_annot and 'NOT ' or '')), ())
