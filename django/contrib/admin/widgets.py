@@ -301,8 +301,6 @@ class GenericForeignKeyRawIdWidget(ForeignKeyRawIdWidget):
             <a href="%(related)s%(url)s" class="related-lookup" id="lookup_id_%(name)s" onclick="return showGenericRelatedObjectLookupPopup(document.getElementById('id_%(ct_field)s'), this, '%(related)s%(url)s');"> """
              % {'related': related_url, 'url': url, 'name': name, 'ct_field': self.ct_field})
         output.append('<img src="%simg/admin/selector-search.gif" width="16" height="16" alt="%s" /></a>' % (settings.ADMIN_MEDIA_PREFIX, _('Lookup')))
-        if value:
-            output.append(self.label_for_value(value))
         
         from django.contrib.contenttypes.models import ContentType
         content_types = """
