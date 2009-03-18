@@ -42,7 +42,7 @@ class SQLEvaluator(object):
                 field, source, opts, join_list, last, _ = query.setup_joins(
                     field_list, query.get_meta(),
                     query.get_initial_alias(), False)
-                _, _, col, _, join_list = query.trim_joins(source, join_list, last, False)
+                col, _, join_list = query.trim_joins(source, join_list, last, False)
 
                 self.cols[node] = (join_list[-1], col)
             except FieldDoesNotExist:
@@ -74,9 +74,8 @@ class SQLEvaluator(object):
             if sql:
                 expressions.append(format % sql)
                 expression_params.extend(params)
-        conn = ' %s ' % node.connector
 
-        return conn.join(expressions), expression_params
+        return connection.ops.combine_expression(node.connector, expressions), expression_params
 
     def evaluate_leaf(self, node, qn):
         if not qn:

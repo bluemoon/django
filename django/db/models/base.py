@@ -69,6 +69,7 @@ class ModelBase(type):
 
         if getattr(new_class, '_default_manager', None):
             new_class._default_manager = None
+            new_class._base_manager = None
 
         # Bail out early if we have already created this class.
         m = get_model(new_class._meta.app_label, name, False)
@@ -94,12 +95,20 @@ class ModelBase(type):
                          new_class._meta.virtual_fields
             field_names = set([f.name for f in new_fields])
 
+            parent_fields = base._meta.local_fields + base._meta.local_many_to_many
+            # Check for clashes between locally declared fields and those
+            # on the base classes (we cannot handle shadowed fields at the
+            # moment).
+            for field in parent_fields:
+                if field.name in field_names:
+                    raise FieldError('Local field %r in class %r clashes '
+                                     'with field of similar name from '
+                                     'base class %r' %
+                                        (field.name, name, base.__name__))
             if not base._meta.abstract:
                 # Concrete classes...
                 if base in o2o_map:
                     field = o2o_map[base]
-                    field.primary_key = True
-                    new_class._meta.setup_pk(field)
                 else:
                     attr_name = '%s_ptr' % base._meta.module_name
                     field = OneToOneField(base, name=attr_name,
@@ -109,16 +118,7 @@ class ModelBase(type):
 
             else:
                 # .. and abstract ones.
-
-                # Check for clashes between locally declared fields and those
-                # on the ABC.
-                parent_fields = base._meta.local_fields + base._meta.local_many_to_many
                 for field in parent_fields:
-                    if field.name in field_names:
-                        raise FieldError('Local field %r in class %r clashes '\
-                                         'with field of similar name from '\
-                                         'abstract base class %r' % \
-                                            (field.name, name, base.__name__))
                     new_class.add_to_class(field.name, copy.deepcopy(field))
 
                 # Pass any non-abstract parent classes onto child.
@@ -133,7 +133,8 @@ class ModelBase(type):
                     new_manager = manager._copy_to_model(new_class)
                     new_class.add_to_class(mgr_name, new_manager)
 
-            # Inherit virtual fields (like GenericForeignKey) from the parent class
+            # Inherit virtual fields (like GenericForeignKey) from the parent
+            # class
             for field in base._meta.virtual_fields:
                 if base._meta.abstract and field.name in field_names:
                     raise FieldError('Local field %r in class %r clashes '\
@@ -224,12 +225,13 @@ class Model(object):
         # keywords, or default.
 
         for field in fields_iter:
-            rel_obj = None
+            is_related_object = False
             if kwargs:
                 if isinstance(field.rel, ManyToOneRel):
                     try:
                         # Assume object instance was passed in.
                         rel_obj = kwargs.pop(field.name)
+                        is_related_object = True
                     except KeyError:
                         try:
                             # Object instance wasn't passed in -- must be an ID.
@@ -245,11 +247,11 @@ class Model(object):
                     val = kwargs.pop(field.attname, field.get_default())
             else:
                 val = field.get_default()
-            # If we got passed a related instance, set it using the field.name
-            # instead of field.attname (e.g. "user" instead of "user_id") so
-            # that the object gets properly cached (and type checked) by the
-            # RelatedObjectDescriptor.
-            if rel_obj:
+            if is_related_object:
+                # If we are passed a related instance, set it using the
+                # field.name instead of field.attname (e.g. "user" instead of
+                # "user_id") so that the object gets properly cached (and type
+                # checked) by the RelatedObjectDescriptor.
                 setattr(self, field.name, rel_obj)
             else:
                 setattr(self, field.attname, val)
@@ -368,14 +370,14 @@ class Model(object):
         pk_val = self._get_pk_val(meta)
         pk_set = pk_val is not None
         record_exists = True
-        manager = cls._default_manager
+        manager = cls._base_manager
         if pk_set:
             # Determine whether a record with the primary key already exists.
             if (force_update or (not force_insert and
                     manager.filter(pk=pk_val).extra(select={'a': 1}).values('a').order_by())):
                 # It does already exist, so do an UPDATE.
                 if force_update or non_pks:
-                    values = [(f, None, f.get_db_prep_save(raw and getattr(self, f.attname) or f.pre_save(self, False))) for f in non_pks]
+                    values = [(f, None, (raw and getattr(self, f.attname) or f.pre_save(self, False))) for f in non_pks]
                     rows = manager.filter(pk=pk_val)._update(values)
                     if force_update and not rows:
                         raise DatabaseError("Forced update did not affect any rows.")
@@ -498,6 +500,8 @@ class Model(object):
             setattr(self, cachename, obj)
         return getattr(self, cachename)
 
+    def prepare_database_save(self, unused):
+        return self.pk
 
 
 ############################################

@@ -113,14 +113,19 @@ class UpdateQuery(Query):
     def execute_sql(self, result_type=None):
         """
         Execute the specified update. Returns the number of rows affected by
-        the primary update query (there could be other updates on related
-        tables, but their rowcounts are not returned).
+        the primary update query. The "primary update query" is the first
+        non-empty query that is executed. Row counts for any subsequent,
+        related queries are not available.
         """
         cursor = super(UpdateQuery, self).execute_sql(result_type)
-        rows = cursor.rowcount
+        rows = cursor and cursor.rowcount or 0
+        is_empty = cursor is None
         del cursor
         for query in self.get_related_updates():
-            query.execute_sql(result_type)
+            aux_rows = query.execute_sql(result_type)
+            if is_empty:
+                rows = aux_rows
+                is_empty = False
         return rows
 
     def as_sql(self):
@@ -174,21 +179,9 @@ class UpdateQuery(Query):
         query = self.clone(klass=Query)
         query.bump_prefix()
         query.extra_select = {}
-        first_table = query.tables[0]
-        if query.alias_refcount[first_table] == 1:
-            # We can remove one table from the inner query.
-            query.unref_alias(first_table)
-            for i in xrange(1, len(query.tables)):
-                table = query.tables[i]
-                if query.alias_refcount[table]:
-                    break
-            join_info = query.alias_map[table]
-            query.select = [(join_info[RHS_ALIAS], join_info[RHS_JOIN_COL])]
-            must_pre_select = False
-        else:
-            query.select = []
-            query.add_fields([query.model._meta.pk.name])
-            must_pre_select = not self.connection.features.update_can_self_select
+        query.select = []
+        query.add_fields([query.model._meta.pk.name])
+        must_pre_select = count > 1 and not self.connection.features.update_can_self_select
 
         # Now we adjust the current query: reset the where clause and get rid
         # of all the tables we don't need (since they're in the sub-select).
@@ -246,9 +239,10 @@ class UpdateQuery(Query):
         """
         from django.db.models.base import Model
         for field, model, val in values_seq:
-            # FIXME: Some sort of db_prep_* is probably more appropriate here.
-            if field.rel and isinstance(val, Model):
-                val = val.pk
+            if hasattr(val, 'prepare_database_save'):
+                val = val.prepare_database_save(field)
+            else:
+                val = field.get_db_prep_save(val)
 
             # Getting the placeholder for the field.
             if hasattr(field, 'get_placeholder'):
@@ -297,10 +291,11 @@ class InsertQuery(Query):
         self.columns = []
         self.values = []
         self.params = ()
+        self.return_id = False
 
     def clone(self, klass=None, **kwargs):
         extras = {'columns': self.columns[:], 'values': self.values[:],
-                'params': self.params}
+                  'params': self.params, 'return_id': self.return_id}
         extras.update(kwargs)
         return super(InsertQuery, self).clone(klass, **extras)
 
@@ -308,16 +303,27 @@ class InsertQuery(Query):
         # We don't need quote_name_unless_alias() here, since these are all
         # going to be column names (so we can avoid the extra overhead).
         qn = self.connection.ops.quote_name
-        result = ['INSERT INTO %s' % qn(self.model._meta.db_table)]
+        opts = self.model._meta
+        result = ['INSERT INTO %s' % qn(opts.db_table)]
         result.append('(%s)' % ', '.join([qn(c) for c in self.columns]))
         result.append('VALUES (%s)' % ', '.join(self.values))
-        return ' '.join(result), self.params
+        params = self.params
+        if self.return_id and self.connection.features.can_return_id_from_insert:
+            col = "%s.%s" % (qn(opts.db_table), qn(opts.pk.column))
+            r_fmt, r_params = self.connection.ops.return_insert_id()
+            result.append(r_fmt % col)
+            params = params + r_params
+        return ' '.join(result), params
 
     def execute_sql(self, return_id=False):
+        self.return_id = return_id
         cursor = super(InsertQuery, self).execute_sql(None)
-        if return_id:
-            return self.connection.ops.last_insert_id(cursor,
-                    self.model._meta.db_table, self.model._meta.pk.column)
+        if not (return_id and cursor):
+            return
+        if self.connection.features.can_return_id_from_insert:
+            return self.connection.ops.fetch_returned_insert_id(cursor)
+        return self.connection.ops.last_insert_id(cursor,
+                self.model._meta.db_table, self.model._meta.pk.column)
 
     def insert_values(self, insert_values, raw_values=False):
         """

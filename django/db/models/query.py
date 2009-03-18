@@ -447,8 +447,20 @@ class QuerySet(object):
                 "Cannot update a query once a slice has been taken."
         query = self.query.clone(sql.UpdateQuery)
         query.add_update_values(kwargs)
-        rows = query.execute_sql(None)
-        transaction.commit_unless_managed()
+        if not transaction.is_managed():
+            transaction.enter_transaction_management()
+            forced_managed = True
+        else:
+            forced_managed = False
+        try:
+            rows = query.execute_sql(None)
+            if forced_managed:
+                transaction.commit()
+            else:
+                transaction.commit_unless_managed()
+        finally:
+            if forced_managed:
+                transaction.leave_transaction_management()
         self._result_cache = None
         return rows
     update.alters_data = True
@@ -596,7 +608,7 @@ class QuerySet(object):
 
         obj = self._clone()
 
-        obj._setup_aggregate_query()
+        obj._setup_aggregate_query(kwargs.keys())
 
         # Add the aggregates to the query
         for (alias, aggregate_expr) in kwargs.items():
@@ -693,22 +705,19 @@ class QuerySet(object):
         """
         pass
 
-    def _setup_aggregate_query(self):
+    def _setup_aggregate_query(self, aggregates):
         """
         Prepare the query for computing a result that contains aggregate annotations.
         """
         opts = self.model._meta
-        if not self.query.group_by:
+        if self.query.group_by is None:
             field_names = [f.attname for f in opts.fields]
             self.query.add_fields(field_names, False)
             self.query.set_group_by()
 
-    def as_sql(self):
+    def _as_sql(self):
         """
         Returns the internal query's SQL and parameters (as a tuple).
-
-        This is a private (internal) method. The name is chosen to provide
-        uniformity with other interfaces (in particular, the Query class).
         """
         obj = self.values("pk")
         return obj.query.as_nested_sql()
@@ -727,11 +736,15 @@ class ValuesQuerySet(QuerySet):
         # names of the model fields to select.
 
     def iterator(self):
-        if (not self.extra_names and
-            len(self.field_names) != len(self.model._meta.fields)):
+        # Purge any extra columns that haven't been explicitly asked for
+        if self.extra_names is not None:
             self.query.trim_extra_select(self.extra_names)
-        names = self.query.extra_select.keys() + self.field_names
-        names.extend(self.query.aggregate_select.keys())
+
+        extra_names = self.query.extra_select.keys()
+        field_names = self.field_names
+        aggregate_names = self.query.aggregate_select.keys()
+
+        names = extra_names + field_names + aggregate_names
 
         for row in self.query.results_iter():
             yield dict(zip(names, row))
@@ -745,29 +758,32 @@ class ValuesQuerySet(QuerySet):
         instance.
         """
         self.query.clear_select_fields()
-        self.extra_names = []
-        self.aggregate_names = []
 
         if self._fields:
+            self.extra_names = []
+            self.aggregate_names = []
             if not self.query.extra_select and not self.query.aggregate_select:
-                field_names = list(self._fields)
+                self.field_names = list(self._fields)
             else:
-                field_names = []
+                self.query.default_cols = False
+                self.field_names = []
                 for f in self._fields:
                     if self.query.extra_select.has_key(f):
                         self.extra_names.append(f)
                     elif self.query.aggregate_select.has_key(f):
                         self.aggregate_names.append(f)
                     else:
-                        field_names.append(f)
+                        self.field_names.append(f)
         else:
             # Default to all fields.
-            field_names = [f.attname for f in self.model._meta.fields]
+            self.extra_names = None
+            self.field_names = [f.attname for f in self.model._meta.fields]
+            self.aggregate_names = None
 
         self.query.select = []
-        self.query.add_fields(field_names, False)
-        self.query.default_cols = False
-        self.field_names = field_names
+        self.query.add_fields(self.field_names, False)
+        if self.aggregate_names is not None:
+            self.query.set_aggregate_mask(self.aggregate_names)
 
     def _clone(self, klass=None, setup=False, **kwargs):
         """
@@ -793,15 +809,19 @@ class ValuesQuerySet(QuerySet):
             raise TypeError("Merging '%s' classes must involve the same values in each case."
                     % self.__class__.__name__)
 
-    def _setup_aggregate_query(self):
+    def _setup_aggregate_query(self, aggregates):
         """
         Prepare the query for computing a result that contains aggregate annotations.
         """
         self.query.set_group_by()
 
-        super(ValuesQuerySet, self)._setup_aggregate_query()
+        if self.aggregate_names is not None:
+            self.aggregate_names.extend(aggregates)
+            self.query.set_aggregate_mask(self.aggregate_names)
 
-    def as_sql(self):
+        super(ValuesQuerySet, self)._setup_aggregate_query(aggregates)
+
+    def _as_sql(self):
         """
         For ValueQuerySet (and subclasses like ValuesListQuerySet), they can
         only be used as nested queries if they're already set up to select only
@@ -817,7 +837,9 @@ class ValuesQuerySet(QuerySet):
 
 class ValuesListQuerySet(ValuesQuerySet):
     def iterator(self):
-        self.query.trim_extra_select(self.extra_names)
+        if self.extra_names is not None:
+            self.query.trim_extra_select(self.extra_names)
+
         if self.flat and len(self._fields) == 1:
             for row in self.query.results_iter():
                 yield row[0]
@@ -825,13 +847,25 @@ class ValuesListQuerySet(ValuesQuerySet):
             for row in self.query.results_iter():
                 yield tuple(row)
         else:
-            # When extra(select=...) is involved, the extra cols come are
-            # always at the start of the row, so we need to reorder the fields
+            # When extra(select=...) or an annotation is involved, the extra cols are
+            # always at the start of the row, and we need to reorder the fields
             # to match the order in self._fields.
-            names = self.query.extra_select.keys() + self.field_names + self.query.aggregate_select.keys()
+            extra_names = self.query.extra_select.keys()
+            field_names = self.field_names
+            aggregate_names = self.query.aggregate_select.keys()
+
+            names = extra_names + field_names + aggregate_names
+
+            # If a field list has been specified, use it. Otherwise, use the
+            # full list of fields, including extras and aggregates.
+            if self._fields:
+                fields = self._fields
+            else:
+                fields = names
+
             for row in self.query.results_iter():
                 data = dict(zip(names, row))
-                yield tuple([data[f] for f in self._fields])
+                yield tuple([data[f] for f in fields])
 
     def _clone(self, *args, **kwargs):
         clone = super(ValuesListQuerySet, self)._clone(*args, **kwargs)
@@ -940,6 +974,11 @@ def delete_objects(seen_objs):
     Iterate through a list of seen classes, and remove any instances that are
     referred to.
     """
+    if not transaction.is_managed():
+        transaction.enter_transaction_management()
+        forced_managed = True
+    else:
+        forced_managed = False
     try:
         ordered_classes = seen_objs.keys()
     except CyclicDependency:
@@ -950,51 +989,58 @@ def delete_objects(seen_objs):
         ordered_classes = seen_objs.unordered_keys()
 
     obj_pairs = {}
-    for cls in ordered_classes:
-        items = seen_objs[cls].items()
-        items.sort()
-        obj_pairs[cls] = items
+    try:
+        for cls in ordered_classes:
+            items = seen_objs[cls].items()
+            items.sort()
+            obj_pairs[cls] = items
 
-        # Pre-notify all instances to be deleted.
-        for pk_val, instance in items:
-            signals.pre_delete.send(sender=cls, instance=instance)
+            # Pre-notify all instances to be deleted.
+            for pk_val, instance in items:
+                signals.pre_delete.send(sender=cls, instance=instance)
 
-        pk_list = [pk for pk,instance in items]
-        del_query = sql.DeleteQuery(cls, connection)
-        del_query.delete_batch_related(pk_list)
+            pk_list = [pk for pk,instance in items]
+            del_query = sql.DeleteQuery(cls, connection)
+            del_query.delete_batch_related(pk_list)
 
-        update_query = sql.UpdateQuery(cls, connection)
-        for field, model in cls._meta.get_fields_with_model():
-            if (field.rel and field.null and field.rel.to in seen_objs and
-                    filter(lambda f: f.column == field.column,
-                    field.rel.to._meta.fields)):
-                if model:
-                    sql.UpdateQuery(model, connection).clear_related(field,
-                            pk_list)
-                else:
-                    update_query.clear_related(field, pk_list)
+            update_query = sql.UpdateQuery(cls, connection)
+            for field, model in cls._meta.get_fields_with_model():
+                if (field.rel and field.null and field.rel.to in seen_objs and
+                        filter(lambda f: f.column == field.column,
+                        field.rel.to._meta.fields)):
+                    if model:
+                        sql.UpdateQuery(model, connection).clear_related(field,
+                                pk_list)
+                    else:
+                        update_query.clear_related(field, pk_list)
 
-    # Now delete the actual data.
-    for cls in ordered_classes:
-        items = obj_pairs[cls]
-        items.reverse()
+        # Now delete the actual data.
+        for cls in ordered_classes:
+            items = obj_pairs[cls]
+            items.reverse()
 
-        pk_list = [pk for pk,instance in items]
-        del_query = sql.DeleteQuery(cls, connection)
-        del_query.delete_batch(pk_list)
+            pk_list = [pk for pk,instance in items]
+            del_query = sql.DeleteQuery(cls, connection)
+            del_query.delete_batch(pk_list)
 
-        # Last cleanup; set NULLs where there once was a reference to the
-        # object, NULL the primary key of the found objects, and perform
-        # post-notification.
-        for pk_val, instance in items:
-            for field in cls._meta.fields:
-                if field.rel and field.null and field.rel.to in seen_objs:
-                    setattr(instance, field.attname, None)
+            # Last cleanup; set NULLs where there once was a reference to the
+            # object, NULL the primary key of the found objects, and perform
+            # post-notification.
+            for pk_val, instance in items:
+                for field in cls._meta.fields:
+                    if field.rel and field.null and field.rel.to in seen_objs:
+                        setattr(instance, field.attname, None)
 
-            signals.post_delete.send(sender=cls, instance=instance)
-            setattr(instance, cls._meta.pk.attname, None)
+                signals.post_delete.send(sender=cls, instance=instance)
+                setattr(instance, cls._meta.pk.attname, None)
 
-    transaction.commit_unless_managed()
+        if forced_managed:
+            transaction.commit()
+        else:
+            transaction.commit_unless_managed()
+    finally:
+        if forced_managed:
+            transaction.leave_transaction_management()
 
 
 def insert_query(model, values, return_id=False, raw_values=False):

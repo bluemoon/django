@@ -291,7 +291,7 @@ class BaseGenericInlineFormSet(BaseModelFormSet):
     ct_field_name = "content_type"
     ct_fk_field_name = "object_id"
 
-    def __init__(self, data=None, files=None, instance=None, save_as_new=None):
+    def __init__(self, data=None, files=None, instance=None, save_as_new=None, prefix=None):
         opts = self.model._meta
         self.instance = instance
         self.rel_name = '-'.join((
@@ -300,14 +300,22 @@ class BaseGenericInlineFormSet(BaseModelFormSet):
         ))
         super(BaseGenericInlineFormSet, self).__init__(
             queryset=self.get_queryset(), data=data, files=files,
-            prefix=self.rel_name
+            prefix=prefix
         )
+
+    #@classmethod
+    def get_default_prefix(cls):
+        opts = cls.model._meta
+        return '-'.join((opts.app_label, opts.object_name.lower(),
+                        cls.ct_field.name, cls.ct_fk_field.name,
+        ))
+    get_default_prefix = classmethod(get_default_prefix)
 
     def get_queryset(self):
         # Avoid a circular import.
         from django.contrib.contenttypes.models import ContentType
         if self.instance is None:
-            return self.model._default_manager.empty()
+            return self.model._default_manager.none()
         return self.model._default_manager.filter(**{
             self.ct_field.name: ContentType.objects.get_for_model(self.instance),
             self.ct_fk_field.name: self.instance.pk,

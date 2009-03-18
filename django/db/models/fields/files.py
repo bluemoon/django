@@ -34,6 +34,10 @@ class FieldFile(File):
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __hash__(self):
+        # Required because we defined a custom __eq__.
+        return hash(self.name)
+
     # The standard File contains most of the necessary properties, but
     # FieldFiles can be instantiated without a name, so that needs to
     # be checked for here.
@@ -122,7 +126,7 @@ class FileDescriptor(object):
 
     def __get__(self, instance=None, owner=None):
         if instance is None:
-            raise AttributeError, "%s can only be accessed from %s instances." % (self.field.name(self.owner.__name__))
+            raise AttributeError("The '%s' attribute can only be accessed from %s instances." % (self.field.name, owner.__name__))
         file = instance.__dict__[self.field.name]
         if isinstance(file, basestring) or file is None:
             # Create a new instance of FieldFile, based on a given file name
@@ -132,7 +136,7 @@ class FileDescriptor(object):
             # have the FieldFile interface added to them
             file_copy = copy.copy(file)
             file_copy.__class__ = type(file.__class__.__name__, 
-                                       (file.__class__, FieldFile), {})
+                                       (file.__class__, self.field.attr_class), {})
             file_copy.instance = instance
             file_copy.field = self.field
             file_copy.storage = self.field.storage
@@ -212,6 +216,10 @@ class FileField(Field):
 
     def generate_filename(self, instance, filename):
         return os.path.join(self.get_directory_name(), self.get_filename(filename))
+
+    def save_form_data(self, instance, data):
+        if data:
+            setattr(instance, self.name, data)
 
     def formfield(self, **kwargs):
         defaults = {'form_class': forms.FileField}

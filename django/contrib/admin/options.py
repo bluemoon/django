@@ -1,6 +1,6 @@
 from django import forms, template
 from django.forms.formsets import all_valid
-from django.forms.models import modelform_factory, inlineformset_factory
+from django.forms.models import modelform_factory, modelformset_factory, inlineformset_factory
 from django.forms.models import BaseInlineFormSet
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin import widgets
@@ -16,6 +16,7 @@ from django.utils.safestring import mark_safe
 from django.utils.functional import curry
 from django.utils.text import capfirst, get_text_list
 from django.utils.translation import ugettext as _
+from django.utils.translation import ngettext
 from django.utils.encoding import force_unicode
 try:
     set
@@ -119,7 +120,7 @@ class BaseModelAdmin(object):
         if db_field.__class__ in self.formfield_overrides:
             kwargs = dict(self.formfield_overrides[db_field.__class__], **kwargs)
             return db_field.formfield(**kwargs)
-                        
+            
         # For any other type of field, just call its formfield() method.
         return db_field.formfield(**kwargs)
         
@@ -188,6 +189,7 @@ class ModelAdmin(BaseModelAdmin):
     list_filter = ()
     list_select_related = False
     list_per_page = 100
+    list_editable = ()
     search_fields = ()
     date_hierarchy = None
     save_as = False
@@ -323,6 +325,29 @@ class ModelAdmin(BaseModelAdmin):
         }
         defaults.update(kwargs)
         return modelform_factory(self.model, **defaults)
+    
+    def get_changelist_form(self, request, **kwargs):
+        """
+        Returns a Form class for use in the Formset on the changelist page.
+        """
+        defaults = {
+            "formfield_callback": curry(self.formfield_for_dbfield, request=request),
+        }
+        defaults.update(kwargs)
+        return modelform_factory(self.model, **defaults)
+    
+    def get_changelist_formset(self, request, **kwargs):
+        """
+        Returns a FormSet class for use on the changelist page if list_editable 
+        is used.
+        """
+        defaults = {
+            "formfield_callback": curry(self.formfield_for_dbfield, request=request),
+        }
+        defaults.update(kwargs)
+        return modelformset_factory(self.model, 
+            self.get_changelist_form(request), extra=0, 
+            fields=self.list_editable, **defaults)
     
     def get_formsets(self, request, obj=None):
         for inline in self.inline_instances:
@@ -533,10 +558,16 @@ class ModelAdmin(BaseModelAdmin):
             else:
                 form_validated = False
                 new_object = self.model()
+            prefixes = {}
             for FormSet in self.get_formsets(request):
+                prefix = FormSet.get_default_prefix()
+                prefixes[prefix] = prefixes.get(prefix, 0) + 1
+                if prefixes[prefix] != 1:
+                    prefix = "%s-%s" % (prefix, prefixes[prefix])
                 formset = FormSet(data=request.POST, files=request.FILES,
                                   instance=new_object,
-                                  save_as_new=request.POST.has_key("_saveasnew"))
+                                  save_as_new=request.POST.has_key("_saveasnew"),
+                                  prefix=prefix)
                 formsets.append(formset)
             if all_valid(formsets) and form_validated:
                 self.save_model(request, new_object, form, change=False)
@@ -558,8 +589,13 @@ class ModelAdmin(BaseModelAdmin):
                 if isinstance(f, models.ManyToManyField):
                     initial[k] = initial[k].split(",")
             form = ModelForm(initial=initial)
+            prefixes = {}
             for FormSet in self.get_formsets(request):
-                formset = FormSet(instance=self.model())
+                prefix = FormSet.get_default_prefix()
+                prefixes[prefix] = prefixes.get(prefix, 0) + 1
+                if prefixes[prefix] != 1:
+                    prefix = "%s-%s" % (prefix, prefixes[prefix])
+                formset = FormSet(instance=self.model(), prefix=prefix)
                 formsets.append(formset)
         
         adminForm = helpers.AdminForm(form, list(self.get_fieldsets(request)), self.prepopulated_fields)
@@ -619,9 +655,14 @@ class ModelAdmin(BaseModelAdmin):
             else:
                 form_validated = False
                 new_object = obj
+            prefixes = {}
             for FormSet in self.get_formsets(request, new_object):
+                prefix = FormSet.get_default_prefix()
+                prefixes[prefix] = prefixes.get(prefix, 0) + 1
+                if prefixes[prefix] != 1:
+                    prefix = "%s-%s" % (prefix, prefixes[prefix])
                 formset = FormSet(request.POST, request.FILES,
-                                  instance=new_object)
+                                  instance=new_object, prefix=prefix)
                 formsets.append(formset)
             
             if all_valid(formsets) and form_validated:
@@ -636,8 +677,13 @@ class ModelAdmin(BaseModelAdmin):
         
         else:
             form = ModelForm(instance=obj)
+            prefixes = {}
             for FormSet in self.get_formsets(request, obj):
-                formset = FormSet(instance=obj)
+                prefix = FormSet.get_default_prefix()
+                prefixes[prefix] = prefixes.get(prefix, 0) + 1
+                if prefixes[prefix] != 1:
+                    prefix = "%s-%s" % (prefix, prefixes[prefix])
+                formset = FormSet(instance=obj, prefix=prefix)
                 formsets.append(formset)
         
         adminForm = helpers.AdminForm(form, self.get_fieldsets(request, obj), self.prepopulated_fields)
@@ -675,7 +721,7 @@ class ModelAdmin(BaseModelAdmin):
             raise PermissionDenied
         try:
             cl = ChangeList(request, self.model, self.list_display, self.list_display_links, self.list_filter,
-                self.date_hierarchy, self.search_fields, self.list_select_related, self.list_per_page, self)
+                self.date_hierarchy, self.search_fields, self.list_select_related, self.list_per_page, self.list_editable, self)
         except IncorrectLookupParameters:
             # Wacky lookup parameters were given, so redirect to the main
             # changelist page, without parameters, and pass an 'invalid=1'
@@ -686,10 +732,53 @@ class ModelAdmin(BaseModelAdmin):
                 return render_to_response('admin/invalid_setup.html', {'title': _('Database error')})
             return HttpResponseRedirect(request.path + '?' + ERROR_FLAG + '=1')
         
+        # If we're allowing changelist editing, we need to construct a formset
+        # for the changelist given all the fields to be edited. Then we'll
+        # use the formset to validate/process POSTed data.
+        formset = cl.formset = None
+        
+        # Handle POSTed bulk-edit data.
+        if request.method == "POST" and self.list_editable:
+            FormSet = self.get_changelist_formset(request)
+            formset = cl.formset = FormSet(request.POST, request.FILES, queryset=cl.result_list)
+            if formset.is_valid():
+                changecount = 0
+                for form in formset.forms:
+                    if form.has_changed():
+                        obj = self.save_form(request, form, change=True)
+                        self.save_model(request, obj, form, change=True)
+                        form.save_m2m()
+                        change_msg = self.construct_change_message(request, form, None)
+                        self.log_change(request, obj, change_msg)
+                        changecount += 1
+                
+                if changecount:
+                    msg = ngettext("%(count)s %(singular)s was changed successfully.", 
+                                   "%(count)s %(plural)s were changed successfully.", 
+                                   changecount) % {'count': changecount,
+                                                   'singular': force_unicode(opts.verbose_name), 
+                                                   'plural': force_unicode(opts.verbose_name_plural),
+                                                   'obj': force_unicode(obj)}
+                    self.message_user(request, msg)
+            
+                return HttpResponseRedirect(request.get_full_path())
+        
+        # Handle GET -- construct a formset for display.
+        elif self.list_editable:
+            FormSet = self.get_changelist_formset(request)
+            formset = cl.formset = FormSet(queryset=cl.result_list)
+        
+        # Build the list of media to be used by the formset.
+        if formset:
+            media = self.media + formset.media
+        else:
+            media = None
+
         context = {
             'title': cl.title,
             'is_popup': cl.is_popup,
             'cl': cl,
+            'media': media,
             'has_add_permission': self.has_add_permission(request),
             'root_path': self.admin_site.root_path,
             'app_label': app_label,

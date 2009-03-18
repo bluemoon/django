@@ -193,12 +193,15 @@ class Field(object):
 
     def get_db_prep_lookup(self, lookup_type, value):
         "Returns field's value prepared for database lookup."
-        if hasattr(value, 'as_sql'):
+        if hasattr(value, 'as_sql') or hasattr(value, '_as_sql'):
             # If the value has a relabel_aliases method, it will need to
             # be invoked before the final SQL is evaluated
             if hasattr(value, 'relabel_aliases'):
                 return value
-            sql, params = value.as_sql()
+            if hasattr(value, 'as_sql'):
+                sql, params = value.as_sql()
+            else:
+                sql, params = value._as_sql()
             return QueryWrapper(('(%s)' % sql), params)
 
         if lookup_type in ('regex', 'iregex', 'month', 'day', 'week_day', 'search'):
@@ -818,6 +821,11 @@ class TimeField(Field):
             return None
         if isinstance(value, datetime.time):
             return value
+        if isinstance(value, datetime.datetime):
+            # Not usually a good idea to pass in a datetime here (it loses
+            # information), but this can be a side-effect of interacting with a
+            # database backend (e.g. Oracle), so we'll be accommodating.
+            return value.time
 
         # Attempt to parse a datetime:
         value = smart_str(value)

@@ -238,6 +238,32 @@ class PointerA(models.Model):
 class PointerB(models.Model):
     connection = models.ForeignKey(SharedConnection)
 
+# Multi-layer ordering
+class SingleObject(models.Model):
+    name = models.CharField(max_length=10)
+
+    class Meta:
+        ordering = ['name']
+
+    def __unicode__(self):
+        return self.name
+
+class RelatedObject(models.Model):
+    single = models.ForeignKey(SingleObject)
+
+    class Meta:
+        ordering = ['single']
+
+class Plaything(models.Model):
+    name = models.CharField(max_length=10)
+    others = models.ForeignKey(RelatedObject, null=True)
+
+    class Meta:
+        ordering = ['others']
+
+    def __unicode__(self):
+        return self.name
+
 
 __test__ = {'API_TESTS':"""
 >>> t1 = Tag.objects.create(name='t1')
@@ -877,11 +903,17 @@ used in lookups.
 >>> Item.objects.filter(created__in=[time1, time2])
 [<Item: one>, <Item: two>]
 
-Bug #7698 -- People like to slice with '0' as the high-water mark.
+Bug #7698, #10202 -- People like to slice with '0' as the high-water mark.
 >>> Item.objects.all()[0:0]
 []
 >>> Item.objects.all()[0:0][:10]
 []
+>>> Item.objects.all()[:0].count()
+0
+>>> Item.objects.all()[:0].latest('created')
+Traceback (most recent call last):
+    ...
+AssertionError: Cannot change a query once a slice has been taken.
 
 Bug #7411 - saving to db must work even with partially read result set in
 another cursor.
@@ -1016,11 +1048,14 @@ performance problems on backends like MySQL.
 [<Annotation: a1>]
 
 Nested queries should not evaluate the inner query as part of constructing the
-SQL. This test verifies this: if the inner query is evaluated, the outer "in"
-lookup will raise an EmptyResultSet exception (as the inner query returns
-nothing).
->>> print Annotation.objects.filter(notes__in=Note.objects.filter(note="xyzzy")).query
-SELECT ...
+SQL (so we should see a nested query here, indicated by two "SELECT" calls).
+>>> Annotation.objects.filter(notes__in=Note.objects.filter(note="xyzzy")).query.as_sql()[0].count('SELECT')
+2
+
+Bug #10181 -- Avoid raising an EmptyResultSet if an inner query is provably
+empty (and hence, not executed).
+>>> Tag.objects.filter(id__in=Tag.objects.filter(id__in=[]))
+[]
 
 Bug #9997 -- If a ValuesList or Values queryset is passed as an inner query, we
 make sure it's only requesting a single value and use that as the thing to
@@ -1043,6 +1078,30 @@ Bug #9985 -- qs.values_list(...).values(...) combinations should work.
 [{'id': 1}, {'id': 2}, {'id': 3}]
 >>> Annotation.objects.filter(notes__in=Note.objects.filter(note="n1").values_list('note').values('id'))
 [<Annotation: a1>]
+
+Bug #10028 -- ordering by model related to nullable relations(!) should use
+outer joins, so that all results are included.
+>>> _ = Plaything.objects.create(name="p1")
+>>> Plaything.objects.all()
+[<Plaything: p1>]
+
+Bug #10205 -- When bailing out early because of an empty "__in" filter, we need
+to set things up correctly internally so that subqueries can continue properly.
+>>> Tag.objects.filter(name__in=()).update(name="foo")
+0
+
+Bug #10432 (see also the Python 2.4+ tests for this, below). Testing an empty
+"__in" filter with a generator as the value.
+>>> def f():
+...     return iter([])
+>>> n_obj = Note.objects.all()[0]
+>>> def g():
+...     for i in [n_obj.pk]:
+...         yield i
+>>> Note.objects.filter(pk__in=f())
+[]
+>>> list(Note.objects.filter(pk__in=g())) == [n_obj]
+True
 
 """}
 
@@ -1092,5 +1151,15 @@ portion in MySQL to prevent unnecessary sorting.
 True
 >>> sql.find("NULL", pos + len(fragment)) == pos + len(fragment)
 True
+
+"""
+
+# Generator expressions are only in Python 2.4 and later.
+if sys.version_info >= (2, 4):
+    __test__["API_TESTS"] += """
+Using an empty generator expression as the rvalue for an "__in" lookup is legal
+(regression for #10432).
+>>> Note.objects.filter(pk__in=(x for x in ()))
+[]
 
 """
