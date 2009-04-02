@@ -60,6 +60,9 @@ class Manager(object):
         if model._meta.abstract or self._inherited:
             model._meta.abstract_managers.append((self.creation_counter, name,
                     self))
+        else:
+            model._meta.concrete_managers.append((self.creation_counter, name,
+                self))
 
     def _set_creation_counter(self):
         """
@@ -163,6 +166,12 @@ class Manager(object):
 
     def reverse(self, *args, **kwargs):
         return self.get_query_set().reverse(*args, **kwargs)
+
+    def defer(self, *args, **kwargs):
+        return self.get_query_set().defer(*args, **kwargs)
+
+    def only(self, *args, **kwargs):
+        return self.get_query_set().only(*args, **kwargs)
 
     def _insert(self, values, **kwargs):
         return insert_query(self.model, values, **kwargs)

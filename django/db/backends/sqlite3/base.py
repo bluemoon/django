@@ -3,10 +3,12 @@ SQLite3 backend for django.
 
 Python 2.3 and 2.4 require pysqlite2 (http://pysqlite.org/).
 
-Python 2.5 and later use the sqlite3 module in the standard library.
+Python 2.5 and later can use a pysqlite2 module or the sqlite3 module in the
+standard library.
 """
 
 from django.db.backends import *
+from django.db.backends.signals import connection_created
 from django.db.backends.sqlite3.client import DatabaseClient
 from django.db.backends.sqlite3.creation import DatabaseCreation
 from django.db.backends.sqlite3.introspection import DatabaseIntrospection
@@ -14,18 +16,18 @@ from django.utils.safestring import SafeString
 
 try:
     try:
-        from sqlite3 import dbapi2 as Database
-    except ImportError, e1:
         from pysqlite2 import dbapi2 as Database
+    except ImportError, e1:
+        from sqlite3 import dbapi2 as Database
 except ImportError, exc:
     import sys
     from django.core.exceptions import ImproperlyConfigured
     if sys.version_info < (2, 5, 0):
-        module = 'pysqlite2'
-    else:
-        module = 'sqlite3'
+        module = 'pysqlite2 module'
         exc = e1
-    raise ImproperlyConfigured, "Error loading %s module: %s" % (module, exc)
+    else:
+        module = 'either pysqlite2 or sqlite3 modules (tried in that order)'
+    raise ImproperlyConfigured, "Error loading %s: %s" % (module, exc)
 
 try:
     import decimal
@@ -170,6 +172,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             self.connection.create_function("django_extract", 2, _sqlite_extract)
             self.connection.create_function("django_date_trunc", 2, _sqlite_date_trunc)
             self.connection.create_function("regexp", 2, _sqlite_regexp)
+            connection_created.send(sender=self.__class__)
         return self.connection.cursor(factory=SQLiteCursorWrapper)
 
     def close(self):

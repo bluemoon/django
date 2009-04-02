@@ -6,9 +6,11 @@ if __name__ == '__main__':
     # before importing 'template'.
     settings.configure()
 
-import os
-import unittest
 from datetime import datetime, timedelta
+import os
+import sys
+import traceback
+import unittest
 
 from django import template
 from django.core import urlresolvers
@@ -18,8 +20,10 @@ from django.utils.translation import activate, deactivate, ugettext as _
 from django.utils.safestring import mark_safe
 from django.utils.tzinfo import LocalTimezone
 
-from unicode import unicode_tests
 from context import context_tests
+from custom import custom_filters
+from parser import filter_parsing, variable_parsing
+from unicode import unicode_tests
 
 try:
     from loaders import *
@@ -31,7 +35,9 @@ import filters
 # Some other tests we would like to run
 __test__ = {
     'unicode': unicode_tests,
-    'context': context_tests
+    'context': context_tests,
+    'filter_parsing': filter_parsing,
+    'custom_filters': custom_filters,
 }
 
 #################################
@@ -147,6 +153,28 @@ class Templates(unittest.TestCase):
         split = token.split_contents()
         self.assertEqual(split, ["sometag", '_("Page not found")', 'value|yesno:_("yes,no")'])
 
+    def test_url_reverse_no_settings_module(self):
+        #Regression test for #9005
+        from django.template import Template, Context, TemplateSyntaxError
+        
+        old_settings_module = settings.SETTINGS_MODULE
+        old_template_debug = settings.TEMPLATE_DEBUG
+        
+        settings.SETTINGS_MODULE = None
+        settings.TEMPLATE_DEBUG = True
+        
+        t = Template('{% url will_not_match %}')
+        c = Context()
+        try:
+            rendered = t.render(c)
+        except TemplateSyntaxError, e:
+            #Assert that we are getting the template syntax error and not the
+            #string encoding error.
+            self.assertEquals(e.message, "Caught an exception while rendering: Reverse for 'will_not_match' with arguments '()' and keyword arguments '{}' not found.")
+        
+        settings.SETTINGS_MODULE = old_settings_module
+        settings.TEMPLATE_DEBUG = old_template_debug
+
     def test_templates(self):
         template_tests = self.get_template_tests()
         filter_tests = filters.get_filter_tests()
@@ -203,10 +231,11 @@ class Templates(unittest.TestCase):
                 try:
                     test_template = loader.get_template(name)
                     output = self.render(test_template, vals)
-                except Exception, e:
-                    if e.__class__ != result:
-                        raise
-                        failures.append("Template test (TEMPLATE_STRING_IF_INVALID='%s'): %s -- FAILED. Got %s, exception: %s" % (invalid_str, name, e.__class__, e))
+                except Exception:
+                    exc_type, exc_value, exc_tb = sys.exc_info()
+                    if exc_type != result:
+                        tb = '\n'.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+                        failures.append("Template test (TEMPLATE_STRING_IF_INVALID='%s'): %s -- FAILED. Got %s, exception: %s\n%s" % (invalid_str, name, exc_type, exc_value, tb))
                     continue
                 if output != result:
                     failures.append("Template test (TEMPLATE_STRING_IF_INVALID='%s'): %s -- FAILED. Expected %r, got %r" % (invalid_str, name, result, output))
@@ -223,7 +252,8 @@ class Templates(unittest.TestCase):
         settings.TEMPLATE_DEBUG = old_td
         settings.TEMPLATE_STRING_IF_INVALID = old_invalid
 
-        self.assertEqual(failures, [], '\n'.join(failures))
+        self.assertEqual(failures, [], "Tests failed:\n%s\n%s" %
+            ('-'*70, ("\n%s\n" % ('-'*70)).join(failures)))
 
     def render(self, test_template, vals):
         return test_template.render(template.Context(vals[1]))
@@ -422,13 +452,13 @@ class Templates(unittest.TestCase):
             'cycle07': ('{% cycle a,b,c as foo %}{% cycle bar %}', {}, template.TemplateSyntaxError),
             'cycle08': ('{% cycle a,b,c as foo %}{% cycle foo %}{{ foo }}{{ foo }}{% cycle foo %}{{ foo }}', {}, 'abbbcc'),
             'cycle09': ("{% for i in test %}{% cycle a,b %}{{ i }},{% endfor %}", {'test': range(5)}, 'a0,b1,a2,b3,a4,'),
-            # New format:
             'cycle10': ("{% cycle 'a' 'b' 'c' as abc %}{% cycle abc %}", {}, 'ab'),
             'cycle11': ("{% cycle 'a' 'b' 'c' as abc %}{% cycle abc %}{% cycle abc %}", {}, 'abc'),
             'cycle12': ("{% cycle 'a' 'b' 'c' as abc %}{% cycle abc %}{% cycle abc %}{% cycle abc %}", {}, 'abca'),
             'cycle13': ("{% for i in test %}{% cycle 'a' 'b' %}{{ i }},{% endfor %}", {'test': range(5)}, 'a0,b1,a2,b3,a4,'),
             'cycle14': ("{% cycle one two as foo %}{% cycle foo %}", {'one': '1','two': '2'}, '12'),
             'cycle15': ("{% for i in test %}{% cycle aye bee %}{{ i }},{% endfor %}", {'test': range(5), 'aye': 'a', 'bee': 'b'}, 'a0,b1,a2,b3,a4,'),
+            'cycle16': ("{% cycle one|lower two as foo %}{% cycle foo %}", {'one': 'A','two': '2'}, 'a2'),
 
             ### EXCEPTIONS ############################################################
 
@@ -636,6 +666,13 @@ class Templates(unittest.TestCase):
             'ifequal-numeric11': ('{% ifequal x -5.2 %}yes{% endifequal %}', {'x': -5.2}, 'yes'),
             'ifequal-numeric12': ('{% ifequal x +5 %}yes{% endifequal %}', {'x': 5}, 'yes'),
 
+            # FILTER EXPRESSIONS AS ARGUMENTS
+            'ifequal-filter01': ('{% ifequal a|upper "A" %}x{% endifequal %}', {'a': 'a'}, 'x'),
+            'ifequal-filter02': ('{% ifequal "A" a|upper %}x{% endifequal %}', {'a': 'a'}, 'x'),
+            'ifequal-filter03': ('{% ifequal a|upper b|upper %}x{% endifequal %}', {'a': 'x', 'b': 'X'}, 'x'),
+            'ifequal-filter04': ('{% ifequal x|slice:"1" "a" %}x{% endifequal %}', {'x': 'aaa'}, 'x'),
+            'ifequal-filter05': ('{% ifequal x|slice:"1"|upper "A" %}x{% endifequal %}', {'x': 'aaa'}, 'x'),
+
             ### IFNOTEQUAL TAG ########################################################
             'ifnotequal01': ("{% ifnotequal a b %}yes{% endifnotequal %}", {"a": 1, "b": 2}, "yes"),
             'ifnotequal02': ("{% ifnotequal a b %}yes{% endifnotequal %}", {"a": 1, "b": 1}, ""),
@@ -647,6 +684,8 @@ class Templates(unittest.TestCase):
             'include02': ('{% include "basic-syntax02" %}', {'headline': 'Included'}, "Included"),
             'include03': ('{% include template_name %}', {'template_name': 'basic-syntax02', 'headline': 'Included'}, "Included"),
             'include04': ('a{% include "nonexistent" %}b', {}, "ab"),
+            'include 05': ('template with a space', {}, 'template with a space'),
+            'include06': ('{% include "include 05"%}', {}, 'template with a space'),
 
             ### NAMED ENDBLOCKS #######################################################
 
@@ -746,6 +785,12 @@ class Templates(unittest.TestCase):
             # Inheritance from a template that doesn't have any blocks
             'inheritance27': ("{% extends 'inheritance26' %}", {}, 'no tags'),
 
+            # Set up a base template with a space in it.
+            'inheritance 28': ("{% block first %}!{% endblock %}", {}, '!'),
+
+            # Inheritance from a template with a space in its name should work.
+            'inheritance29': ("{% extends 'inheritance 28' %}", {}, '!'),
+
             ### I18N ##################################################################
 
             # {% spaceless %} tag
@@ -794,12 +839,11 @@ class Templates(unittest.TestCase):
             'i18n14': ('{% cycle "foo" _("Password") _(\'Password\') as c %} {% cycle c %} {% cycle c %}', {'LANGUAGE_CODE': 'de'}, 'foo Passwort Passwort'),
             'i18n15': ('{{ absent|default:_("Password") }}', {'LANGUAGE_CODE': 'de', 'absent': ""}, 'Passwort'),
             'i18n16': ('{{ _("<") }}', {'LANGUAGE_CODE': 'de'}, '<'),
-            'i18n17': ('{{ _("") }}', {'LANGUAGE_CODE': 'de'}, ''),
 
             # Escaping inside blocktrans works as if it was directly in the
             # template.
-            'i18n18': ('{% load i18n %}{% blocktrans with anton|escape as berta %}{{ berta }}{% endblocktrans %}', {'anton': 'α & β'}, u'α &amp; β'),
-            'i18n19': ('{% load i18n %}{% blocktrans with anton|force_escape as berta %}{{ berta }}{% endblocktrans %}', {'anton': 'α & β'}, u'α &amp; β'),
+            'i18n17': ('{% load i18n %}{% blocktrans with anton|escape as berta %}{{ berta }}{% endblocktrans %}', {'anton': 'α & β'}, u'α &amp; β'),
+            'i18n18': ('{% load i18n %}{% blocktrans with anton|force_escape as berta %}{{ berta }}{% endblocktrans %}', {'anton': 'α & β'}, u'α &amp; β'),
 
             ### HANDLING OF TEMPLATE_STRING_IF_INVALID ###################################
 
@@ -886,7 +930,10 @@ class Templates(unittest.TestCase):
             # Raise exception if we don't have 3 args, last one an integer
             'widthratio08': ('{% widthratio %}', {}, template.TemplateSyntaxError),
             'widthratio09': ('{% widthratio a b %}', {'a':50,'b':100}, template.TemplateSyntaxError),
-            'widthratio10': ('{% widthratio a b 100.0 %}', {'a':50,'b':100}, template.TemplateSyntaxError),
+            'widthratio10': ('{% widthratio a b 100.0 %}', {'a':50,'b':100}, '50'),
+            
+            # #10043: widthratio should allow max_width to be a variable
+            'widthratio11': ('{% widthratio a b c %}', {'a':50,'b':100, 'c': 100}, '50'),
 
             ### WITH TAG ########################################################
             'with01': ('{% with dict.key as key %}{{ key }}{% endwith %}', {'dict': {'key':50}}, '50'),

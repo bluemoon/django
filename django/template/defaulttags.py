@@ -39,7 +39,7 @@ class CommentNode(Node):
 
 class CycleNode(Node):
     def __init__(self, cyclevars, variable_name=None):
-        self.cycle_iter = itertools_cycle([Variable(v) for v in cyclevars])
+        self.cycle_iter = itertools_cycle(cyclevars)
         self.variable_name = variable_name
 
     def render(self, context):
@@ -70,14 +70,11 @@ class FilterNode(Node):
 
 class FirstOfNode(Node):
     def __init__(self, vars):
-        self.vars = map(Variable, vars)
+        self.vars = vars
 
     def render(self, context):
         for var in self.vars:
-            try:
-                value = var.resolve(context)
-            except VariableDoesNotExist:
-                continue
+            value = var.resolve(context, True)
             if value:
                 return smart_unicode(value)
         return u''
@@ -169,7 +166,7 @@ class IfChangedNode(Node):
     def __init__(self, nodelist_true, nodelist_false, *varlist):
         self.nodelist_true, self.nodelist_false = nodelist_true, nodelist_false
         self._last_seen = None
-        self._varlist = map(Variable, varlist)
+        self._varlist = varlist
         self._id = str(id(self))
 
     def render(self, context):
@@ -180,7 +177,7 @@ class IfChangedNode(Node):
             if self._varlist:
                 # Consider multiple parameters.  This automatically behaves
                 # like an OR evaluation of the multiple variables.
-                compare_to = [var.resolve(context) for var in self._varlist]
+                compare_to = [var.resolve(context, True) for var in self._varlist]
             else:
                 compare_to = self.nodelist_true.render(context)
         except VariableDoesNotExist:
@@ -200,7 +197,7 @@ class IfChangedNode(Node):
 
 class IfEqualNode(Node):
     def __init__(self, var1, var2, nodelist_true, nodelist_false, negate):
-        self.var1, self.var2 = Variable(var1), Variable(var2)
+        self.var1, self.var2 = var1, var2
         self.nodelist_true, self.nodelist_false = nodelist_true, nodelist_false
         self.negate = negate
 
@@ -208,14 +205,8 @@ class IfEqualNode(Node):
         return "<IfEqualNode>"
 
     def render(self, context):
-        try:
-            val1 = self.var1.resolve(context)
-        except VariableDoesNotExist:
-            val1 = None
-        try:
-            val2 = self.var2.resolve(context)
-        except VariableDoesNotExist:
-            val2 = None
+        val1 = self.var1.resolve(context, True)
+        val2 = self.var2.resolve(context, True)
         if (self.negate and val1 != val2) or (not self.negate and val1 == val2):
             return self.nodelist_true.render(context)
         return self.nodelist_false.render(context)
@@ -371,24 +362,30 @@ class URLNode(Node):
         args = [arg.resolve(context) for arg in self.args]
         kwargs = dict([(smart_str(k,'ascii'), v.resolve(context))
                        for k, v in self.kwargs.items()])
-        
-        
+
         # Try to look up the URL twice: once given the view name, and again
-        # relative to what we guess is the "main" app. If they both fail, 
-        # re-raise the NoReverseMatch unless we're using the 
+        # relative to what we guess is the "main" app. If they both fail,
+        # re-raise the NoReverseMatch unless we're using the
         # {% url ... as var %} construct in which cause return nothing.
         url = ''
         try:
             url = reverse(self.view_name, args=args, kwargs=kwargs)
-        except NoReverseMatch:
-            project_name = settings.SETTINGS_MODULE.split('.')[0]
-            try:
-                url = reverse(project_name + '.' + self.view_name,
+        except NoReverseMatch, e:
+            if settings.SETTINGS_MODULE:
+                project_name = settings.SETTINGS_MODULE.split('.')[0]
+                try:
+                    url = reverse(project_name + '.' + self.view_name,
                               args=args, kwargs=kwargs)
-            except NoReverseMatch:
+                except NoReverseMatch:
+                    if self.asvar is None:
+                        # Re-raise the original exception, not the one with
+                        # the path relative to the project. This makes a 
+                        # better error message.
+                        raise e
+            else:
                 if self.asvar is None:
-                    raise
-                    
+                    raise e
+
         if self.asvar:
             context[self.asvar] = url
             return ''
@@ -405,12 +402,15 @@ class WidthRatioNode(Node):
         try:
             value = self.val_expr.resolve(context)
             maxvalue = self.max_expr.resolve(context)
+            max_width = int(self.max_width.resolve(context))
         except VariableDoesNotExist:
             return ''
+        except ValueError:
+            raise TemplateSyntaxError("widthratio final argument must be an number")
         try:
             value = float(value)
             maxvalue = float(maxvalue)
-            ratio = (value / maxvalue) * int(self.max_width)
+            ratio = (value / maxvalue) * max_width
         except (ValueError, ZeroDivisionError):
             return ''
         return str(int(round(ratio)))
@@ -514,12 +514,14 @@ def cycle(parser, token):
 
     if len(args) > 4 and args[-2] == 'as':
         name = args[-1]
-        node = CycleNode(args[1:-2], name)
+        values = [parser.compile_filter(arg) for arg in args[1:-2]]
+        node = CycleNode(values, name)
         if not hasattr(parser, '_namedCycleNodes'):
             parser._namedCycleNodes = {}
         parser._namedCycleNodes[name] = node
     else:
-        node = CycleNode(args[1:])
+        values = [parser.compile_filter(arg) for arg in args[1:]]
+        node = CycleNode(values)
     return node
 cycle = register.tag(cycle)
 
@@ -594,7 +596,7 @@ def firstof(parser, token):
     if len(bits) < 1:
         raise TemplateSyntaxError("'firstof' statement requires at least one"
                                   " argument")
-    return FirstOfNode(bits)
+    return FirstOfNode([parser.compile_filter(bit) for bit in bits])
 firstof = register.tag(firstof)
 
 #@register.tag(name="for")
@@ -629,10 +631,10 @@ def do_for(parser, token):
             <li>Sorry, no athletes in this list.</li>
           {% endfor %}
         <ul>
-        
+
     The above is equivalent to -- but shorter, cleaner, and possibly faster
     than -- the following::
-    
+
         <ul>
           {% if althete_list %}
             {% for athlete in athlete_list %}
@@ -701,7 +703,9 @@ def do_ifequal(parser, token, negate):
         parser.delete_first_token()
     else:
         nodelist_false = NodeList()
-    return IfEqualNode(bits[1], bits[2], nodelist_true, nodelist_false, negate)
+    val1 = parser.compile_filter(bits[1])
+    val2 = parser.compile_filter(bits[2])
+    return IfEqualNode(val1, val2, nodelist_true, nodelist_false, negate)
 
 #@register.tag
 def ifequal(parser, token):
@@ -864,7 +868,8 @@ def ifchanged(parser, token):
         parser.delete_first_token()
     else:
         nodelist_false = NodeList()
-    return IfChangedNode(nodelist_true, nodelist_false, *bits[1:])
+    values = [parser.compile_filter(bit) for bit in bits[1:]]
+    return IfChangedNode(nodelist_true, nodelist_false, *values)
 ifchanged = register.tag(ifchanged)
 
 #@register.tag
@@ -1105,7 +1110,7 @@ def url(parser, token):
     args = []
     kwargs = {}
     asvar = None
-        
+
     if len(bits) > 2:
         bits = iter(bits[2:])
         for bit in bits:
@@ -1141,12 +1146,10 @@ def widthratio(parser, token):
     if len(bits) != 4:
         raise TemplateSyntaxError("widthratio takes three arguments")
     tag, this_value_expr, max_value_expr, max_width = bits
-    try:
-        max_width = int(max_width)
-    except ValueError:
-        raise TemplateSyntaxError("widthratio final argument must be an integer")
+
     return WidthRatioNode(parser.compile_filter(this_value_expr),
-                          parser.compile_filter(max_value_expr), max_width)
+                          parser.compile_filter(max_value_expr),
+                          parser.compile_filter(max_width))
 widthratio = register.tag(widthratio)
 
 #@register.tag

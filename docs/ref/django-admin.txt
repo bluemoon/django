@@ -228,7 +228,7 @@ directives::
     easy for humans to read, so you can use the ``--indent`` option to
     pretty-print the output with a number of indentation spaces.
 
-.. versionadded: 1.1
+.. versionadded:: 1.1
 
 In addition to specifying application names, you can provide a list of
 individual models, in the form of ``appname.Model``. If you specify a model
@@ -340,6 +340,9 @@ directories will be included in the search path. For example::
 would search ``<appname>/fixtures/foo/bar/mydata.json`` for each installed
 application,  ``<dirname>/foo/bar/mydata.json`` for each directory in
 ``FIXTURE_DIRS``, and the literal path ``foo/bar/mydata.json``.
+
+When fixture files are processed, the data is saved to the database as is.
+Model defined ``save`` methods and ``pre_save`` signals are not called.
 
 Note that the order in which fixture files are processed is undefined. However,
 all fixture data is installed as a single transaction, so data in

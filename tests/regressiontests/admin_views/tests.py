@@ -1,6 +1,7 @@
 # coding: utf-8
 
 import re
+import datetime
 
 from django.test import TestCase
 from django.contrib.auth.models import User, Permission
@@ -8,10 +9,11 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin.models import LogEntry
 from django.contrib.admin.sites import LOGIN_FORM_KEY
 from django.contrib.admin.util import quote
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.utils.html import escape
 
 # local test models
-from models import Article, CustomArticle, Section, ModelWithStringPrimaryKey, Person, Persona, FooAccount, BarAccount
+from models import Article, CustomArticle, Section, ModelWithStringPrimaryKey, Person, Persona, FooAccount, BarAccount, Subscriber, ExternalSubscriber, Podcast, EmptyModel
 
 try:
     set
@@ -19,7 +21,7 @@ except NameError:
     from sets import Set as set
 
 class AdminViewBasicTest(TestCase):
-    fixtures = ['admin-views-users.xml', 'admin-views-colors.xml']
+    fixtures = ['admin-views-users.xml', 'admin-views-colors.xml', 'admin-views-fabrics.xml']
 
     # Store the bit of the URL where the admin is registered as a class
     # variable. That way we can test a second AdminSite just by subclassing
@@ -76,48 +78,66 @@ class AdminViewBasicTest(TestCase):
         response = self.client.post('/test_admin/%s/admin_views/section/add/' % self.urlbit, post_data)
         self.failUnlessEqual(response.status_code, 302) # redirect somewhere
 
+    # Post data for edit inline
+    inline_post_data = {
+        "name": u"Test section",
+        # inline data
+        "article_set-TOTAL_FORMS": u"6",
+        "article_set-INITIAL_FORMS": u"3",
+        "article_set-0-id": u"1",
+        # there is no title in database, give one here or formset will fail.
+        "article_set-0-title": u"Norske bostaver æøå skaper problemer",
+        "article_set-0-content": u"&lt;p&gt;Middle content&lt;/p&gt;",
+        "article_set-0-date_0": u"2008-03-18",
+        "article_set-0-date_1": u"11:54:58",
+        "article_set-0-section": u"1",
+        "article_set-1-id": u"2",
+        "article_set-1-title": u"Need a title.",
+        "article_set-1-content": u"&lt;p&gt;Oldest content&lt;/p&gt;",
+        "article_set-1-date_0": u"2000-03-18",
+        "article_set-1-date_1": u"11:54:58",
+        "article_set-2-id": u"3",
+        "article_set-2-title": u"Need a title.",
+        "article_set-2-content": u"&lt;p&gt;Newest content&lt;/p&gt;",
+        "article_set-2-date_0": u"2009-03-18",
+        "article_set-2-date_1": u"11:54:58",
+        "article_set-3-id": u"",
+        "article_set-3-title": u"",
+        "article_set-3-content": u"",
+        "article_set-3-date_0": u"",
+        "article_set-3-date_1": u"",
+        "article_set-4-id": u"",
+        "article_set-4-title": u"",
+        "article_set-4-content": u"",
+        "article_set-4-date_0": u"",
+        "article_set-4-date_1": u"",
+        "article_set-5-id": u"",
+        "article_set-5-title": u"",
+        "article_set-5-content": u"",
+        "article_set-5-date_0": u"",
+        "article_set-5-date_1": u"",
+    }
+
     def testBasicEditPost(self):
         """
         A smoke test to ensure POST on edit_view works.
         """
-        post_data = {
-            "name": u"Test section",
-            # inline data
-            "article_set-TOTAL_FORMS": u"6",
-            "article_set-INITIAL_FORMS": u"3",
-            "article_set-0-id": u"1",
-            # there is no title in database, give one here or formset
-            # will fail.
-            "article_set-0-title": u"Norske bostaver æøå skaper problemer",
-            "article_set-0-content": u"&lt;p&gt;Middle content&lt;/p&gt;",
-            "article_set-0-date_0": u"2008-03-18",
-            "article_set-0-date_1": u"11:54:58",
-            "article_set-1-id": u"2",
-            "article_set-1-title": u"Need a title.",
-            "article_set-1-content": u"&lt;p&gt;Oldest content&lt;/p&gt;",
-            "article_set-1-date_0": u"2000-03-18",
-            "article_set-1-date_1": u"11:54:58",
-            "article_set-2-id": u"3",
-            "article_set-2-title": u"Need a title.",
-            "article_set-2-content": u"&lt;p&gt;Newest content&lt;/p&gt;",
-            "article_set-2-date_0": u"2009-03-18",
-            "article_set-2-date_1": u"11:54:58",
-            "article_set-3-id": u"",
-            "article_set-3-title": u"",
-            "article_set-3-content": u"",
-            "article_set-3-date_0": u"",
-            "article_set-3-date_1": u"",
-            "article_set-4-id": u"",
-            "article_set-4-title": u"",
-            "article_set-4-content": u"",
-            "article_set-4-date_0": u"",
-            "article_set-4-date_1": u"",
-            "article_set-5-id": u"",
-            "article_set-5-title": u"",
-            "article_set-5-content": u"",
-            "article_set-5-date_0": u"",
-            "article_set-5-date_1": u"",
-        }
+        response = self.client.post('/test_admin/%s/admin_views/section/1/' % self.urlbit, self.inline_post_data)
+        self.failUnlessEqual(response.status_code, 302) # redirect somewhere
+
+    def testEditSaveAs(self):
+        """
+        Test "save as".
+        """
+        post_data = self.inline_post_data.copy()
+        post_data.update({
+            '_saveasnew': u'Save+as+new',
+            "article_set-1-section": u"1",
+            "article_set-2-section": u"1",
+            "article_set-3-section": u"1",
+            "article_set-4-section": u"1",
+            "article_set-5-section": u"1",
+        })
         response = self.client.post('/test_admin/%s/admin_views/section/1/' % self.urlbit, post_data)
         self.failUnlessEqual(response.status_code, 302) # redirect somewhere
 
@@ -179,6 +199,37 @@ class AdminViewBasicTest(TestCase):
         self.assertRedirects(response, '/test_admin/%s/admin_views/thing/?e=1' % self.urlbit)
         response = self.client.get('/test_admin/%s/admin_views/thing/' % self.urlbit, {'color__id__exact': 'StringNotInteger!'})
         self.assertRedirects(response, '/test_admin/%s/admin_views/thing/?e=1' % self.urlbit)
+
+    def testNamedGroupFieldChoicesChangeList(self):
+        """
+        Ensures the admin changelist shows correct values in the relevant column
+        for rows corresponding to instances of a model in which a named group
+        has been used in the choices option of a field.
+        """
+        response = self.client.get('/test_admin/%s/admin_views/fabric/' % self.urlbit)
+        self.failUnlessEqual(response.status_code, 200)
+        self.failUnless(
+            '<a href="1/">Horizontal</a>' in response.content and
+            '<a href="2/">Vertical</a>' in response.content,
+            "Changelist table isn't showing the right human-readable values set by a model field 'choices' option named group."
+        )
+
+    def testNamedGroupFieldChoicesFilter(self):
+        """
+        Ensures the filter UI shows correctly when at least one named group has
+        been used in the choices option of a model field.
+        """
+        response = self.client.get('/test_admin/%s/admin_views/fabric/' % self.urlbit)
+        self.failUnlessEqual(response.status_code, 200)
+        self.failUnless(
+            '<div id="changelist-filter">' in response.content,
+            "Expected filter not found in changelist view."
+        )
+        self.failUnless(
+            '<a href="?surface__exact=x">Horizontal</a>' in response.content and
+            '<a href="?surface__exact=y">Vertical</a>' in response.content,
+            "Changelist filter isn't showing options contained inside a model field 'choices' option named group."
+        )
 
 class CustomModelAdminTest(AdminViewBasicTest):
     urlbit = "admin2"
@@ -516,7 +567,7 @@ class AdminViewStringPrimaryKeyTest(TestCase):
     def test_changelist_to_changeform_link(self):
         "The link from the changelist referring to the changeform of the object should be quoted"
         response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/')
-        should_contain = """<tr class="row1"><th><a href="%s/">%s</a></th></tr>""" % (quote(self.pk), escape(self.pk))
+        should_contain = """<th><a href="%s/">%s</a></th></tr>""" % (quote(self.pk), escape(self.pk))
         self.assertContains(response, should_contain)
 
     def test_recentactions_link(self):
@@ -738,29 +789,36 @@ class AdminViewListEditable(TestCase):
 
     def tearDown(self):
         self.client.logout()
-    
+
+    def test_inheritance(self):
+        Podcast.objects.create(name="This Week in Django",
+            release_date=datetime.date.today())
+        response = self.client.get('/test_admin/admin/admin_views/podcast/')
+        self.failUnlessEqual(response.status_code, 200)
+
     def test_changelist_input_html(self):
         response = self.client.get('/test_admin/admin/admin_views/person/')
         # 2 inputs per object(the field and the hidden id field) = 6
         # 2 management hidden fields = 2
+        # 4 action inputs (3 regular checkboxes, 1 checkbox to select all)
         # main form submit button = 1
         # search field and search submit button = 2
         # 6 + 2 + 1 + 2 = 11 inputs
-        self.failUnlessEqual(response.content.count("<input"), 11)
+        self.failUnlessEqual(response.content.count("<input"), 15)
         # 1 select per object = 3 selects
-        self.failUnlessEqual(response.content.count("<select"), 3)
-    
+        self.failUnlessEqual(response.content.count("<select"), 4)
+
     def test_post_submission(self):
         data = {
             "form-TOTAL_FORMS": "3",
             "form-INITIAL_FORMS": "3",
-            
+
             "form-0-gender": "1",
             "form-0-id": "1",
-            
+
             "form-1-gender": "2",
             "form-1-id": "2",
-            
+
             "form-2-alive": "checked",
             "form-2-gender": "1",
             "form-2-id": "3",
@@ -769,34 +827,34 @@ class AdminViewListEditable(TestCase):
 
         self.failUnlessEqual(Person.objects.get(name="John Mauchly").alive, False)
         self.failUnlessEqual(Person.objects.get(name="Grace Hooper").gender, 2)
-        
+
         # test a filtered page
         data = {
             "form-TOTAL_FORMS": "2",
             "form-INITIAL_FORMS": "2",
-            
+
             "form-0-id": "1",
             "form-0-gender": "1",
             "form-0-alive": "checked",
-            
+
             "form-1-id": "3",
             "form-1-gender": "1",
             "form-1-alive": "checked",
         }
         self.client.post('/test_admin/admin/admin_views/person/?gender__exact=1', data)
-        
+
         self.failUnlessEqual(Person.objects.get(name="John Mauchly").alive, True)
-        
+
         # test a searched page
         data = {
             "form-TOTAL_FORMS": "1",
             "form-INITIAL_FORMS": "1",
-            
+
             "form-0-id": "1",
             "form-0-gender": "1"
         }
         self.client.post('/test_admin/admin/admin_views/person/?q=mauchly', data)
-        
+
         self.failUnlessEqual(Person.objects.get(name="John Mauchly").alive, False)
 
 class AdminInheritedInlinesTest(TestCase):
@@ -875,3 +933,106 @@ class AdminInheritedInlinesTest(TestCase):
         self.failUnlessEqual(FooAccount.objects.all()[0].username, "%s-1" % foo_user)
         self.failUnlessEqual(BarAccount.objects.all()[0].username, "%s-1" % bar_user)
         self.failUnlessEqual(Persona.objects.all()[0].accounts.count(), 2)
+
+from django.core import mail
+
+class AdminActionsTest(TestCase):
+    fixtures = ['admin-views-users.xml', 'admin-views-actions.xml']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_model_admin_custom_action(self):
+        "Tests a custom action defined in a ModelAdmin method"
+        action_data = {
+            ACTION_CHECKBOX_NAME: [1],
+            'action' : 'mail_admin',
+            'index': 0,
+        }
+        response = self.client.post('/test_admin/admin/admin_views/subscriber/', action_data)
+        self.assertEquals(len(mail.outbox), 1)
+        self.assertEquals(mail.outbox[0].subject, 'Greetings from a ModelAdmin action')
+
+    def test_model_admin_default_delete_action(self):
+        "Tests the default delete action defined as a ModelAdmin method"
+        action_data = {
+            ACTION_CHECKBOX_NAME: [1, 2],
+            'action' : 'delete_selected',
+            'index': 0,
+        }
+        delete_confirmation_data = {
+            ACTION_CHECKBOX_NAME: [1, 2],
+            'action' : 'delete_selected',
+            'index': 0,
+            'post': 'yes',
+        }
+        confirmation = self.client.post('/test_admin/admin/admin_views/subscriber/', action_data)
+        self.assertContains(confirmation, "Are you sure you want to delete the selected subscriber objects")
+        self.failUnless(confirmation.content.count(ACTION_CHECKBOX_NAME) == 2)
+        response = self.client.post('/test_admin/admin/admin_views/subscriber/', delete_confirmation_data)
+        self.failUnlessEqual(Subscriber.objects.count(), 0)
+
+    def test_custom_function_mail_action(self):
+        "Tests a custom action defined in a function"
+        action_data = {
+            ACTION_CHECKBOX_NAME: [1],
+            'action' : 'external_mail',
+            'index': 0,
+        }
+        response = self.client.post('/test_admin/admin/admin_views/externalsubscriber/', action_data)
+        self.assertEquals(len(mail.outbox), 1)
+        self.assertEquals(mail.outbox[0].subject, 'Greetings from a function action')
+
+    def test_custom_function_action_with_redirect(self):
+        "Tests a custom action defined in a function"
+        action_data = {
+            ACTION_CHECKBOX_NAME: [1],
+            'action' : 'redirect_to',
+            'index': 0,
+        }
+        response = self.client.post('/test_admin/admin/admin_views/externalsubscriber/', action_data)
+        self.failUnlessEqual(response.status_code, 302)
+
+class TestInlineNotEditable(TestCase):
+    fixtures = ['admin-views-users.xml']
+
+    def setUp(self):
+        result = self.client.login(username='super', password='secret')
+        self.failUnlessEqual(result, True)
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test(self):
+        """
+        InlineModelAdmin broken?
+        """
+        response = self.client.get('/test_admin/admin/admin_views/parent/add/')
+        self.failUnlessEqual(response.status_code, 200)
+
+
+class AdminCustomQuerysetTest(TestCase):
+    fixtures = ['admin-views-users.xml']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+        self.pks = [EmptyModel.objects.create().id for i in range(3)]
+
+    def test_changelist_view(self):
+        response = self.client.get('/test_admin/admin/admin_views/emptymodel/')
+        for i in self.pks:
+            if i > 1:
+                self.assertContains(response, 'Primary key = %s' % i)
+            else:
+                self.assertNotContains(response, 'Primary key = %s' % i)
+
+    def test_change_view(self):
+        for i in self.pks:
+            response = self.client.get('/test_admin/admin/admin_views/emptymodel/%s/' % i)
+            if i > 1:
+                self.assertEqual(response.status_code, 200)
+            else:
+                self.assertEqual(response.status_code, 404)

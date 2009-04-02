@@ -188,7 +188,7 @@ class SingleRelatedObjectDescriptor(object):
             return getattr(instance, self.cache_name)
         except AttributeError:
             params = {'%s__pk' % self.related.field.name: instance._get_pk_val()}
-            rel_obj = self.related.model._default_manager.get(**params)
+            rel_obj = self.related.model._base_manager.get(**params)
             setattr(instance, self.cache_name, rel_obj)
             return rel_obj
 
@@ -210,8 +210,8 @@ class SingleRelatedObjectDescriptor(object):
                                 (value, instance._meta.object_name,
                                  self.related.get_accessor_name(), self.related.opts.object_name))
 
-        # Set the value of the related field
-        setattr(value, self.related.field.rel.get_related_field().attname, instance)
+        # Set the value of the related field to the value of the related object's related field
+        setattr(value, self.related.field.attname, getattr(instance, self.related.field.rel.get_related_field().attname))
 
         # Since we already know what the related object is, seed the related
         # object caches now, too. This avoids another db hit if you get the
@@ -296,12 +296,35 @@ class ForeignRelatedObjectsDescriptor(object):
         if instance is None:
             return self
 
+        return self.create_manager(instance,
+                self.related.model._default_manager.__class__)
+
+    def __set__(self, instance, value):
+        if instance is None:
+            raise AttributeError, "Manager must be accessed via instance"
+
+        manager = self.__get__(instance)
+        # If the foreign key can support nulls, then completely clear the related set.
+        # Otherwise, just move the named objects into the set.
+        if self.related.field.null:
+            manager.clear()
+        manager.add(*value)
+
+    def delete_manager(self, instance):
+        """
+        Returns a queryset based on the related model's base manager (rather
+        than the default manager, as returned by __get__). Used by
+        Model.delete().
+        """
+        return self.create_manager(instance,
+                self.related.model._base_manager.__class__)
+
+    def create_manager(self, instance, superclass):
+        """
+        Creates the managers used by other methods (__get__() and delete()).
+        """
         rel_field = self.related.field
         rel_model = self.related.model
-
-        # Dynamically create a class that subclasses the related
-        # model's default manager.
-        superclass = self.related.model._default_manager.__class__
 
         class RelatedManager(superclass):
             def get_query_set(self):
@@ -309,6 +332,8 @@ class ForeignRelatedObjectsDescriptor(object):
 
             def add(self, *objs):
                 for obj in objs:
+                    if not isinstance(obj, self.model):
+                        raise TypeError, "'%s' instance expected" % self.model._meta.object_name
                     setattr(obj, rel_field.name, instance)
                     obj.save()
             add.alters_data = True
@@ -351,17 +376,6 @@ class ForeignRelatedObjectsDescriptor(object):
         manager.model = self.related.model
 
         return manager
-
-    def __set__(self, instance, value):
-        if instance is None:
-            raise AttributeError, "Manager must be accessed via instance"
-
-        manager = self.__get__(instance)
-        # If the foreign key can support nulls, then completely clear the related set.
-        # Otherwise, just move the named objects into the set.
-        if self.related.field.null:
-            manager.clear()
-        manager.add(*value)
 
 def create_many_related_manager(superclass, through=False):
     """Creates a manager that subclasses 'superclass' (which is a Manager)
@@ -440,11 +454,14 @@ def create_many_related_manager(superclass, through=False):
 
             # If there aren't any objects, there is nothing to do.
             if objs:
+                from django.db.models.base import Model
                 # Check that all the objects are of the right type
                 new_ids = set()
                 for obj in objs:
                     if isinstance(obj, self.model):
                         new_ids.add(obj._get_pk_val())
+                    elif isinstance(obj, Model):
+                        raise TypeError, "'%s' instance expected" % self.model._meta.object_name
                     else:
                         new_ids.add(obj)
                 # Add the newly created or already existing objects to the join table.
@@ -631,6 +648,14 @@ class ManyToManyRel(object):
         self.symmetrical = symmetrical
         self.multiple = True
         self.through = through
+
+    def get_related_field(self):
+        """
+        Returns the field in the to' object to which this relationship is tied
+        (this is always the primary key on the target model). Provided for
+        symmetry with ManyToOneRel.
+        """
+        return self.to._meta.pk
 
 class ForeignKey(RelatedField, Field):
     empty_strings_allowed = False
