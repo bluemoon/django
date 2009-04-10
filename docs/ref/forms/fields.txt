@@ -526,13 +526,13 @@ extra arguments; only ``path`` is required:
 
     Optional.  Either ``True`` or ``False``.  Default is ``True``.  Specifies
     whether files in the specified location should be included.  Either this or
-    :attr:`~FilePathField.allow_folders` must be ``True.
+    :attr:`~FilePathField.allow_folders` must be ``True``.
 
 .. attribute:: FilePathField.allow_folders
 
     Optional.  Either ``True`` or ``False``.  Default is ``False``.  Specifies
     whether folders in the specified location should be included.  Either this
-    or :attr:`~FilePathField.allow_files` must be ``True.
+    or :attr:`~FilePathField.allow_files` must be ``True``.
 
 ``FloatField``
 ~~~~~~~~~~~~~~
