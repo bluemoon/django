@@ -256,8 +256,8 @@ class DecimalField(Field):
         digits = len(digittuple)
         if decimals > digits:
             # We have leading zeros up to or past the decimal point.  Count
-            # everything past the decimal point as a digit.  We do not count 
-            # 0 before the decimal point as a digit since that would mean 
+            # everything past the decimal point as a digit.  We do not count
+            # 0 before the decimal point as a digit since that would mean
             # we would not allow max_digits = decimal_places.
             digits = decimals
         whole_digits = digits - decimals
@@ -283,7 +283,7 @@ DEFAULT_DATE_INPUT_FORMATS = (
 )
 
 class DateField(Field):
-    widget = DateInput 
+    widget = DateInput
     default_error_messages = {
         'invalid': _(u'Enter a valid date.'),
     }
@@ -822,14 +822,16 @@ class MultiValueField(Field):
         raise NotImplementedError('Subclasses must implement this method.')
 
 class FilePathField(ChoiceField):
-    def __init__(self, path, match=None, recursive=False, required=True,
-                 widget=None, label=None, initial=None, help_text=None,
-                 *args, **kwargs):
+    def __init__(self, path, match=None, recursive=False, allow_files=True,
+        allow_folders=False, required=True, widget=Select, label=None,
+        initial=None, help_text=None, *args, **kwargs):
         self.path, self.match, self.recursive = path, match, recursive
+        self.allow_files, self.allow_folders = allow_files, allow_folders
+        assert self.allow_files or self.allow_folders
         super(FilePathField, self).__init__(choices=(), required=required,
             widget=widget, label=label, initial=initial, help_text=help_text,
             *args, **kwargs)
-            
+
         if self.required:
             self.choices = []
         else:
@@ -840,15 +842,23 @@ class FilePathField(ChoiceField):
 
         if recursive:
             for root, dirs, files in os.walk(self.path):
-                for f in files:
-                    if self.match is None or self.match_re.search(f):
-                        f = os.path.join(root, f)
-                        self.choices.append((f, f.replace(path, "", 1)))
+                if self.allow_files:
+                    for f in files:
+                        if self.match is None or self.match_re.search(f):
+                            f = os.path.join(root, f)
+                            self.choices.append((f, f.replace(path, "", 1)))
+                if self.allow_folders:
+                    for f in dirs:
+                        if self.match is None or self.match_re.search(f):
+                            f = os.path.join(root, f)
+                            self.choices.append((f, f.replace(path, "", 1)))
         else:
             try:
                 for f in os.listdir(self.path):
                     full_file = os.path.join(self.path, f)
-                    if os.path.isfile(full_file) and (self.match is None or self.match_re.search(f)):
+                    if (((self.allow_files and os.path.isfile(full_file)) or
+                        (self.allow_folders and os.path.isdir(full_file))) and
+                        (self.match is None or self.match_re.search(f))):
                         self.choices.append((full_file, f))
             except OSError:
                 pass

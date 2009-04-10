@@ -493,7 +493,7 @@ class DateField(Field):
                 curry(cls._get_next_or_previous_by_FIELD, field=self, is_next=False))
 
     def get_db_prep_lookup(self, lookup_type, value):
-        # For "__month", "__day", and "__week_day" lookups, convert the value 
+        # For "__month", "__day", and "__week_day" lookups, convert the value
         # to a string so the database backend always sees a consistent type.
         if lookup_type in ('month', 'day', 'week_day'):
             return [force_unicode(value)]
@@ -637,8 +637,11 @@ class EmailField(CharField):
         return super(EmailField, self).formfield(**defaults)
 
 class FilePathField(Field):
-    def __init__(self, verbose_name=None, name=None, path='', match=None, recursive=False, **kwargs):
+    def __init__(self, verbose_name=None, name=None, path='', match=None,
+        recursive=False, allow_files=True, allow_folders=False, **kwargs):
         self.path, self.match, self.recursive = path, match, recursive
+        self.allow_files, self.allow_folders =  allow_files, allow_folders
+        assert self.allow_files or self.allow_folders
         kwargs['max_length'] = kwargs.get('max_length', 100)
         Field.__init__(self, verbose_name, name, **kwargs)
 
@@ -648,6 +651,8 @@ class FilePathField(Field):
             'match': self.match,
             'recursive': self.recursive,
             'form_class': forms.FilePathField,
+            'allow_files': self.allow_files,
+            'allow_folders': self.allow_folders,
         }
         defaults.update(kwargs)
         return super(FilePathField, self).formfield(**defaults)

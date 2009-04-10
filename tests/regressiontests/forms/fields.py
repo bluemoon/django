@@ -1104,7 +1104,7 @@ ValidationError: [u'Select a valid choice. 6 is not one of the available choices
 
 # TypedChoiceField ############################################################
 
-# TypedChoiceField is just like ChoiceField, except that coerced types will 
+# TypedChoiceField is just like ChoiceField, except that coerced types will
 # be returned:
 >>> f = TypedChoiceField(choices=[(1, "+1"), (-1, "-1")], coerce=int)
 >>> f.clean('1')
@@ -1122,7 +1122,7 @@ ValidationError: [u'Select a valid choice. 2 is not one of the available choices
 
 # This can also cause weirdness: be careful (bool(-1) == True, remember)
 >>> f.coerce = bool
->>> f.clean('-1') 
+>>> f.clean('-1')
 True
 
 # Even more weirdness: if you have a valid choice but your coercion function
@@ -1343,6 +1343,14 @@ u'.../django/forms/fields.py'
 >>> f.choices.sort()
 >>> fix_os_paths(f.choices)
 [('.../django/forms/__init__.py', '__init__.py'), ('.../django/forms/extras/__init__.py', 'extras/__init__.py'), ('.../django/forms/extras/widgets.py', 'extras/widgets.py'), ('.../django/forms/fields.py', 'fields.py'), ('.../django/forms/forms.py', 'forms.py'), ('.../django/forms/models.py', 'models.py'), ('.../django/forms/util.py', 'util.py'), ('.../django/forms/widgets.py', 'widgets.py')]
+
+>>> f = forms.FilePathField(path=path, allow_folders=True, allow_files=False)
+>>> fix_os_paths(f.choices)
+[('.../django/forms/extras', 'extras')]
+>>> f = forms.FilePathField(path=path, allow_folders=True, allow_files=True)
+>>> f.choices.sort()
+>>> fix_os_paths(f.choices)
+[('.../django/forms/__init__.py', '__init__.py'), ('.../django/forms/__init__.pyc', '__init__.pyc'), ('.../django/forms/extras', 'extras'), ('.../django/forms/fields.py', 'fields.py'), ('.../django/forms/fields.pyc', 'fields.pyc'), ('.../django/forms/forms.py', 'forms.py'), ('.../django/forms/forms.pyc', 'forms.pyc'), ('.../django/forms/formsets.pyc', 'formsets.pyc'), ('.../django/forms/models.py', 'models.py'), ('.../django/forms/models.pyc', 'models.pyc'), ('.../django/forms/util.py', 'util.py'), ('.../django/forms/util.pyc', 'util.pyc'), ('.../django/forms/widgets.py', 'widgets.py'), ('.../django/forms/widgets.pyc', 'widgets.pyc')]
 
 # SplitDateTimeField ##########################################################
 
