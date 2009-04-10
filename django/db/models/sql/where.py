@@ -278,4 +278,3 @@ class Constraint(object):
             raise EmptyShortCircuit
 
         return (self.alias, self.col, db_type), params
-
