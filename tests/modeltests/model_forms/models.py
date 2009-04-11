@@ -13,8 +13,6 @@ import tempfile
 from django.db import models
 from django.core.files.storage import FileSystemStorage
 
-from fields import UUIDField
-
 # Python 2.3 doesn't have sorted()
 try:
     sorted
@@ -191,16 +189,7 @@ class ExplicitPK(models.Model):
     def __unicode__(self):
         return self.key
 
-class Bar(models.Model):
-    uuid = UUIDField(primary_key=True, db_index=True, auto=True)
 
-
-class Foo(models.Model):
-    book = models.ForeignKey(Book)
-    bar = models.ForeignKey(Bar)
-
-    class Meta:
-        unique_together = (('book', 'bar'),)
 
 __test__ = {'API_TESTS': """
 >>> from django import forms
@@ -1485,19 +1474,6 @@ ValidationError: [u'Select a valid choice. z is not one of the available choices
 <tr><th><label for="id_description">Description:</label></th><td><input type="text" name="description" id="id_description" /></td></tr>
 <tr><th><label for="id_url">The URL:</label></th><td><input id="id_url" type="text" name="url" maxlength="40" /></td></tr>
 
->>> class FooForm(forms.ModelForm):
-...     class Meta:
-...         model = Foo
-
->>> new_bar = Bar.objects.create()
->>> data = {
-...     'bar': str(new_bar.uuid),
-...     'book': str(Book.objects.all()[0].id)
-... }
->>> f = FooForm(data)
->>> new_foo = f.save()
->>> new_foo.bar == new_bar
-True
 
 # Clean up
 >>> import shutil
