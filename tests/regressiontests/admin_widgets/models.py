@@ -6,6 +6,9 @@ from django.contrib.contenttypes import generic
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.models import User
 
+class MyFileField(models.FileField): 
+    pass 
+
 class Member(models.Model):
     name = models.CharField(max_length=100)
     birthdate = models.DateTimeField(blank=True, null=True)
@@ -25,6 +28,7 @@ class Album(models.Model):
     band = models.ForeignKey(Band)
     name = models.CharField(max_length=100)
     cover_art = models.FileField(upload_to='albums')
+    backside_art = MyFileField(upload_to='albums_back', null=True)
 
     def __unicode__(self):
         return self.name

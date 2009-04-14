@@ -119,9 +119,10 @@ class BaseModelAdmin(object):
 
         # If we've got overrides for the formfield defined, use 'em. **kwargs
         # passed to formfield_for_dbfield override the defaults.
-        if db_field.__class__ in self.formfield_overrides:
-            kwargs = dict(self.formfield_overrides[db_field.__class__], **kwargs)
-            return db_field.formfield(**kwargs)
+        for klass in db_field.__class__.mro(): 
+            if klass in self.formfield_overrides: 
+                kwargs = dict(self.formfield_overrides[klass], **kwargs) 
+                return db_field.formfield(**kwargs) 
 
         # For any other type of field, just call its formfield() method.
         return db_field.formfield(**kwargs)
@@ -301,6 +302,18 @@ class ModelAdmin(BaseModelAdmin):
         """
         opts = self.opts
         return request.user.has_perm(opts.app_label + '.' + opts.get_delete_permission())
+
+    def get_model_perms(self, request):
+        """
+        Returns a dict of all perms for this model. This dict has the keys
+        ``add``, ``change``, and ``delete`` mapping to the True/False for each
+        of those actions.
+        """
+        return {
+            'add': self.has_add_permission(request),
+            'change': self.has_change_permission(request),
+            'delete': self.has_delete_permission(request),
+        }
 
     def queryset(self, request):
         """
