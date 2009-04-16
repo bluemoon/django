@@ -123,12 +123,26 @@ class BaseQuery(object):
         obj_dict['related_select_fields'] = []
         obj_dict['related_select_cols'] = []
         del obj_dict['connection']
+
+        # Fields can't be pickled, so if a field list has been
+        # specified, we pickle the list of field names instead.
+        # None is also a possible value; that can pass as-is
+        obj_dict['select_fields'] = [
+            f is not None and f.name or None
+            for f in obj_dict['select_fields']
+        ]
         return obj_dict
 
     def __setstate__(self, obj_dict):
         """
         Unpickling support.
         """
+        # Rebuild list of field instances
+        obj_dict['select_fields'] = [
+            name is not None and obj_dict['model']._meta.get_field(name) or None
+            for name in obj_dict['select_fields']
+        ]
+
         self.__dict__.update(obj_dict)
         # XXX: Need a better solution for this when multi-db stuff is
         # supported. It's the only class-reference to the module-level
@@ -1403,6 +1417,9 @@ class BaseQuery(object):
             field_name = field_list[0]
             col = field_name
             source = self.aggregates[field_name]
+            if not is_summary:
+                raise FieldError("Cannot compute %s('%s'): '%s' is an aggregate" % (
+                    aggregate.name, field_name, field_name))
         elif ((len(field_list) > 1) or
             (field_list[0] not in [i.name for i in opts.fields]) or
             self.group_by is None or
