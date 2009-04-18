@@ -1431,8 +1431,11 @@ class BaseQuery(object):
             #   - this is an annotation over a model field
             # then we need to explore the joins that are required.
 
-            field, source, opts, join_list, last, _ = self.setup_joins(
+            field, source, opts, join_list, last, extra = self.setup_joins(
                 field_list, opts, self.get_initial_alias(), False)
+            # add any extra filters that are needed
+            if extra:
+                self.add_filter(*extra)
 
             # Process the join chain to see if it can be trimmed
             col, _, join_list = self.trim_joins(source, join_list, last, False)

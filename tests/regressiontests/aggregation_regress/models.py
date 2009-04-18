@@ -3,6 +3,8 @@ import pickle
 
 from django.db import models
 from django.conf import settings
+from django.contrib.contenttypes import generic
+from django.contrib.contenttypes.models import ContentType
 
 try:
     sorted
@@ -34,6 +36,7 @@ class Book(models.Model):
     contact = models.ForeignKey(Author, related_name='book_contact_set')
     publisher = models.ForeignKey(Publisher)
     pubdate = models.DateField()
+    tags = generic.GenericRelation('TaggedItem')
 
     class Meta:
         ordering = ('name',)
@@ -65,6 +68,16 @@ class HardbackBook(Book):
 
     def __unicode__(self):
         return "%s (hardback): %s" % (self.name, self.weight)
+
+class TaggedItem(models.Model):
+    tag = models.CharField(max_length=100)
+    content_type = models.ForeignKey(ContentType)
+    object_id = models.PositiveIntegerField()
+    content_object = generic.GenericForeignKey('content_type', 'object_id')
+
+    def __unicode__(self):
+        return "%s tagged with %s" % (self.content_object, self.tag)
+
 
 __test__ = {'API_TESTS': """
 >>> from django.core import management
@@ -145,17 +158,17 @@ __test__ = {'API_TESTS': """
 >>> Book.objects.all().aggregate(num_authors=Count('foo'))
 Traceback (most recent call last):
 ...
-FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, contact, hardbackbook, id, isbn, name, pages, price, pubdate, publisher, rating, store
+FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, contact, hardbackbook, id, isbn, name, pages, price, pubdate, publisher, rating, store, tags
 
 >>> Book.objects.all().annotate(num_authors=Count('foo'))
 Traceback (most recent call last):
 ...
-FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, contact, hardbackbook, id, isbn, name, pages, price, pubdate, publisher, rating, store
+FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, contact, hardbackbook, id, isbn, name, pages, price, pubdate, publisher, rating, store, tags
 
 >>> Book.objects.all().annotate(num_authors=Count('authors__id')).aggregate(Max('foo'))
 Traceback (most recent call last):
 ...
-FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, contact, hardbackbook, id, isbn, name, pages, price, pubdate, publisher, rating, store, num_authors
+FieldError: Cannot resolve keyword 'foo' into field. Choices are: authors, contact, hardbackbook, id, isbn, name, pages, price, pubdate, publisher, rating, store, tags, num_authors
 
 # Old-style count aggregations can be mixed with new-style
 >>> Book.objects.annotate(num_authors=Count('authors')).count()
@@ -317,7 +330,21 @@ True
 Traceback (most recent call last):
 ...
 FieldError: Cannot compute Avg('mean_age'): 'mean_age' is an aggregate
+>>> b = Book.objects.get(name='Practical Django Projects')
+>>> _ = TaggedItem.objects.create(object_id=b.id, content_type=ContentType.objects.get_for_model(b), tag='intermediate')
+>>> _ = TaggedItem.objects.create(object_id=b.id, content_type=ContentType.objects.get_for_model(b), tag='django')
+>>> b = Book.objects.get(name__startswith='Paradigms of Artificial Intelligence')
+>>> _ = TaggedItem.objects.create(object_id=b.id, content_type=ContentType.objects.get_for_model(b), tag='intermediate')
 
+>>> s = Store.objects.get(name__startswith='Amazon')
+>>> _ = TaggedItem.objects.create(object_id=s.id, content_type=ContentType.objects.get_for_model(s), tag='online')
+>>> from django.conf import settings
+>>> settings.DEBUG = True
+>>> from django.db import connection, reset_queries
+>>> reset_queries()
+>>> Book.objects.aggregate(Count('tags'))
+{'tags__count': 3}
+>>> connection.queries
 """
 }
 
