@@ -345,6 +345,7 @@ FieldError: Cannot compute Avg('mean_age'): 'mean_age' is an aggregate
 [(u'Practical Django Projects', 2), (u'Paradigms of Artificial Intelligence Programming: Case Studies in Common Lisp', 1)]
 >>> list(Book.objects.annotate(Count('tags')).order_by('name')) == list(Book.objects.order_by('name'))
 True
+>>> print Book.objects.annotate(Count('tags')).order_by('name').query
 """
 }
 
