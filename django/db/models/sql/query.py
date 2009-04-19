@@ -1433,7 +1433,6 @@ class BaseQuery(object):
 
             field, source, opts, join_list, last, extra = self.setup_joins(
                 field_list, opts, self.get_initial_alias(), False)
-            # add any extra filters that are needed
 
             # Process the join chain to see if it can be trimmed
             col, _, join_list = self.trim_joins(source, join_list, last, False)
@@ -1445,10 +1444,9 @@ class BaseQuery(object):
                 self.promote_alias(column_alias, unconditional=True)
 
             col = (join_list[-1], col)
-            if extra:
-                for filter in extra:
-                    self.add_filter(filter, can_reuse=set(join_list),
-                        process_extras=False)
+            for filter in extra:
+                self.add_filter(filter, can_reuse=set(join_list),
+                    process_extras=False)
         else:
             # The simplest cases. No joins required -
             # just reference the provided column alias.
