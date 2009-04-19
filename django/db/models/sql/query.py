@@ -1435,7 +1435,8 @@ class BaseQuery(object):
                 field_list, opts, self.get_initial_alias(), False)
             # add any extra filters that are needed
             if extra:
-                self.add_filter(*extra)
+                for filter in extra:
+                    self.add_filter(filter, process_extras=False)
 
             # Process the join chain to see if it can be trimmed
             col, _, join_list = self.trim_joins(source, join_list, last, False)
