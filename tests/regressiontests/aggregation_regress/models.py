@@ -338,13 +338,8 @@ FieldError: Cannot compute Avg('mean_age'): 'mean_age' is an aggregate
 
 >>> s = Store.objects.get(name__startswith='Amazon')
 >>> _ = TaggedItem.objects.create(object_id=s.id, content_type=ContentType.objects.get_for_model(s), tag='online')
->>> from django.conf import settings
->>> settings.DEBUG = True
->>> from django.db import connection, reset_queries
->>> reset_queries()
 >>> Book.objects.aggregate(Count('tags'))
 {'tags__count': 3}
->>> connection.queries
 """
 }
 
