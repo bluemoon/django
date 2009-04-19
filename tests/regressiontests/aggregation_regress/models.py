@@ -71,7 +71,7 @@ class HardbackBook(Book):
 
 class TaggedItem(models.Model):
     tag = models.CharField(max_length=100)
-    content_type = models.ForeignKey(ContentType)
+    content_type = models.ForeignKey(ContentType, related_name="aggregation_tagged_item_set")
     object_id = models.PositiveIntegerField()
     content_object = generic.GenericForeignKey('content_type', 'object_id')
 
