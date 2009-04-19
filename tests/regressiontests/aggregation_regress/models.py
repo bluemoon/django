@@ -340,6 +340,11 @@ FieldError: Cannot compute Avg('mean_age'): 'mean_age' is an aggregate
 >>> _ = TaggedItem.objects.create(object_id=s.id, content_type=ContentType.objects.get_for_model(s), tag='online')
 >>> Book.objects.aggregate(Count('tags'))
 {'tags__count': 3}
+
+>>> [(b.name, b.tags__count) for b in Book.objects.annotate(Count('tags')).order_by('-tags__count')[:2]]
+[(u'Practical Django Projects', 2), (u'Paradigms of Artificial Intelligence Programming: Case Studies in Common Lisp', 1)]
+>>> list(Book.objects.annotate(Count('tags')).order_by('name')) == list(Book.objects.order_by('name'))
+True
 """
 }
 
