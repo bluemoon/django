@@ -116,7 +116,7 @@ class ChangeList(object):
 
         # Get the list of objects to display on this page.
         if (self.show_all and can_show_all) or not multi_page:
-            result_list = list(self.query_set)
+            result_list = self.query_set._clone()
         else:
             try:
                 result_list = paginator.page(self.page_num+1).object_list
@@ -229,10 +229,7 @@ class ChangeList(object):
         if self.search_fields and self.query:
             for bit in self.query.split():
                 or_queries = [models.Q(**{construct_search(str(field_name)): bit}) for field_name in self.search_fields]
-                other_qs = QuerySet(self.model)
-                other_qs.dup_select_related(qs)
-                other_qs = other_qs.filter(reduce(operator.or_, or_queries))
-                qs = qs & other_qs
+                qs = qs.filter(reduce(operator.or_, or_queries))
             for field_name in self.search_fields:
                 if '__' in field_name:
                     qs = qs.distinct()
