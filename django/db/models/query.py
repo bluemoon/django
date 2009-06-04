@@ -536,8 +536,21 @@ class QuerySet(object):
         Return a query set in which the returned objects have been annotated
         with data aggregated from related fields.
         """
+        total_aggregates = len(args) + len(kwargs)
         for arg in args:
             kwargs[arg.default_alias] = arg
+
+        if len(kwargs) != total_aggregates:
+            raise ValueError("Some of the aggregates had duplicate aliases, "
+                "check to make sure none of your aggregates conflict with the "
+                "default aliases.")
+
+        names = set([f.name for f in self.model._meta.fields])
+        for aggregate in kwargs:
+            if aggregate in names:
+                raise ValueError("The %s aggregate conflicts with a field on "
+                    "the model." % aggregate)
+
 
         obj = self._clone()
 

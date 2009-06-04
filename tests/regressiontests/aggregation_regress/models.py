@@ -318,6 +318,16 @@ Traceback (most recent call last):
 ...
 FieldError: Cannot compute Avg('mean_age'): 'mean_age' is an aggregate
 
+>>> Book.objects.all().annotate(Avg('authors__age'), authors__age__avg=Avg('authors__age'))
+Traceback (most recent call last):
+...
+ValueError: Some of the aggregates had duplicate aliases, check to make sure none of your aggregates conflict with the default aliases.
+
+>>> Author.objects.annotate(age=Avg('friends__age'))
+Traceback (most recent call last):
+...
+ValueError: The age aggregate conflicts with a field on the model.
+
 """
 }
 
