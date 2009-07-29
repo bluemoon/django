@@ -642,7 +642,9 @@ class AdminMediaHandler(object):
         return safe_join(self.media_dir, relative_path)
 
     def __call__(self, environ, start_response):
-        import os.path
+        from django.core.handlers.wsgi import STATUS_CODE_TEXT
+        from django.http import Http404
+        from django.views.static import serve
 
         # Ignore requests that aren't under ADMIN_MEDIA_PREFIX. Also ignore
         # all requests if ADMIN_MEDIA_PREFIX isn't a relative URL.
@@ -650,46 +652,22 @@ class AdminMediaHandler(object):
             or not environ['PATH_INFO'].startswith(self.media_url):
             return self.application(environ, start_response)
 
-        # Find the admin file and serve it up, if it exists and is readable.
+        request = self.application.request_class(environ)
         try:
-            file_path = self.file_path(environ['PATH_INFO'])
-        except ValueError: # Resulting file path was not valid.
+            response = serve(request, environ['PATH_INFO'][len(self.media_url):], document_root=self.media_dir)
+        except Http404:
             status = '404 NOT FOUND'
-            headers = {'Content-type': 'text/plain'}
-            output = ['Page not found: %s' % environ['PATH_INFO']]
-            start_response(status, headers.items())
-            return output
-        if not os.path.exists(file_path):
-            status = '404 NOT FOUND'
-            headers = {'Content-type': 'text/plain'}
-            output = ['Page not found: %s' % environ['PATH_INFO']]
-        else:
-            try:
-                fp = open(file_path, 'rb')
-            except IOError:
-                status = '401 UNAUTHORIZED'
-                headers = {'Content-type': 'text/plain'}
-                output = ['Permission denied: %s' % environ['PATH_INFO']]
-            else:
-                # This is a very simple implementation of conditional GET with
-                # the Last-Modified header. It makes media files a bit speedier
-                # because the files are only read off disk for the first
-                # request (assuming the browser/client supports conditional
-                # GET).
-                mtime = http_date(os.stat(file_path)[stat.ST_MTIME])
-                headers = {'Last-Modified': mtime}
-                if environ.get('HTTP_IF_MODIFIED_SINCE', None) == mtime:
-                    status = '304 NOT MODIFIED'
-                    output = []
-                else:
-                    status = '200 OK'
-                    mime_type = mimetypes.guess_type(file_path)[0]
-                    if mime_type:
-                        headers['Content-Type'] = mime_type
-                    output = [fp.read()]
-                    fp.close()
-        start_response(status, headers.items())
-        return output
+            start_response(status, {'Content-type': 'text/plain'}.items())
+            return [str('Page not found: %s' % environ['PATH_INFO'])]
+        status_text = STATUS_CODE_TEXT[response.status_code]
+        status = '%s %s' % (response.status_code, status_text)
+        response_headers = [(str(k), str(v)) for k, v in response.items()]
+        for c in response.cookies.values():
+            response_headers.append(('Set-Cookie', str(c.output(header=''))))
+        start_response(status, response_headers)
+        return response
+
+
 
 def run(addr, port, wsgi_handler):
     server_address = (addr, port)
