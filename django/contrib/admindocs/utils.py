@@ -93,7 +93,13 @@ def default_reference_role(name, rawtext, text, lineno, inliner, options=None, c
     if options is None: options = {}
     if content is None: content = []
     context = inliner.document.settings.default_reference_context
-    node = docutils.nodes.reference(rawtext, text, refuri=(ROLES[context] % (inliner.document.settings.link_base, text.lower())), **options)
+    title = text
+    if text.startswith('~'):
+        title = text[1:]
+        dot = title.rfind('.')
+        if dot != -1:
+            title = title[dot+1:]
+    node = docutils.nodes.reference(rawtext, title, refuri=(ROLES[context] % (inliner.document.settings.link_base, text.lower())), **options)
     return [node], []
 
 if docutils_is_available:
