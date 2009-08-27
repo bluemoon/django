@@ -94,8 +94,8 @@ def default_reference_role(name, rawtext, text, lineno, inliner, options=None, c
     if content is None: content = []
     context = inliner.document.settings.default_reference_context
     title = text
-    if text.startswith('~'):
-        title = text[1:]
+    if title.startswith('~'):
+        title = title[1:]
         dot = title.rfind('.')
         if dot != -1:
             title = title[dot+1:]
