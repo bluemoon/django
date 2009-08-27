@@ -85,7 +85,13 @@ def create_reference_role(rolename, urlbase):
     def _role(name, rawtext, text, lineno, inliner, options=None, content=None):
         if options is None: options = {}
         if content is None: content = []
-        node = docutils.nodes.reference(rawtext, text, refuri=(urlbase % (inliner.document.settings.link_base, text.lower())), **options)
+        title = text
+        if title.startswith('~') and name != 'template':
+            title = title[1:]
+            dot = title.rfind('.')
+            if dot != -1:
+                title = title[dot+1:]
+        node = docutils.nodes.reference(rawtext, title, refuri=(urlbase % (inliner.document.settings.link_base, text.lower())), **options)
         return [node], []
     docutils.parsers.rst.roles.register_canonical_role(rolename, _role)
 
