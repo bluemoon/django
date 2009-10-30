@@ -148,6 +148,9 @@ The default number of seconds to cache a page when the caching middleware or
 
 CSRF_COOKIE_NAME
 ----------------
+
+.. versionadded:: 1.2
+
 Default: ``'csrftoken'``
 
 The name of the cookie to use for the CSRF authentication token. This can be whatever you
@@ -157,6 +160,8 @@ want.  See :ref:`ref-contrib-csrf`.
 
 CSRF_COOKIE_DOMAIN
 ------------------
+
+.. versionadded:: 1.2
 
 Default: ``None``
 
@@ -171,7 +176,9 @@ accepted by accepted by a view served from another subdomain.
 CSRF_FAILURE_VIEW
 -----------------
 
-Default: ``'django.contrib.csrf.views.csrf_failure'``
+.. versionadded:: 1.2
+
+Default: ``'django.views.csrf.csrf_failure'``
 
 A dotted path to the view function to be used when an incoming request
 is rejected by the CSRF protection.  The function should have this signature::
@@ -789,7 +796,7 @@ Default::
 
     ('django.middleware.common.CommonMiddleware',
      'django.contrib.sessions.middleware.SessionMiddleware',
-     'django.contrib.csrf.middleware.CsrfViewMiddleware',
+     'django.middleware.csrf.CsrfViewMiddleware',
      'django.contrib.auth.middleware.AuthenticationMiddleware',)
 
 A tuple of middleware classes to use. See :ref:`topics-http-middleware`.
