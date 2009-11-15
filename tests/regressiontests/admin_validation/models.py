@@ -26,6 +26,19 @@ class TwoAlbumFKAndAnE(models.Model):
     e = models.CharField(max_length=1)
 
 
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+
+class Book(models.Model):
+    name = models.CharField(max_length=100)
+    authors = models.ManyToManyField(Author, through='AuthorsBooks')
+
+
+class AuthorsBooks(models.Model):
+    author = models.ForeignKey(Author)
+    book = models.ForeignKey(Book)
+
 
 __test__ = {'API_TESTS':"""
 
@@ -94,5 +107,30 @@ Exception: <class 'regressiontests.admin_validation.models.TwoAlbumFKAndAnE'> ha
 ...     fk_name = "album1"
 
 >>> validate_inline(TwoAlbumFKAndAnEInline, None, Album)
+
+# Regression test for #12203 - Fail more gracefully when a M2M field that
+# specifies the 'through' option is included in the 'fields' ModelAdmin option.
+
+>>> class BookAdmin(admin.ModelAdmin):
+...     fields = ['authors']
+
+>>> validate(BookAdmin, Book)
+Traceback (most recent call last):
+    ...
+ImproperlyConfigured: 'BookAdmin.fields' can't include the ManyToManyField field 'authors' because 'authors' manually specifies a 'through' model.
+
+# Regression test for #12209 -- If the explicitly provided through model
+# is specified as a string, the admin should still be able use
+# Model.m2m_field.through
+
+>>> class AuthorsInline(admin.TabularInline):
+...     model = Book.authors.through
+
+>>> class BookAdmin(admin.ModelAdmin):
+...     inlines = [AuthorsInline]
+
+# If the through model is still a string (and hasn't been resolved to a model)
+# the validation will fail.
+>>> validate(BookAdmin, Book)
 
 """}
