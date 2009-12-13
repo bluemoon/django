@@ -13,7 +13,9 @@ from django.contrib.gis.measure import Area, Distance
 ALL_TERMS = sql.constants.QUERY_TERMS.copy()
 ALL_TERMS.update(SpatialBackend.gis_terms)
 
+# Pulling out other needed constants/routines to avoid attribute lookups.
 TABLE_NAME = sql.constants.TABLE_NAME
+get_proxied_model = sql.query.get_proxied_model
 
 class GeoQuery(sql.Query):
     """
@@ -32,6 +34,13 @@ class GeoQuery(sql.Query):
         self.custom_select = {}
         self.transformed_srid = None
         self.extra_select_fields = {}
+
+    if SpatialBackend.oracle:
+        # Have to override this so that GeoQuery, instead of OracleQuery,
+        # is returned when unpickling.
+        def __reduce__(self):
+            callable, args, data = super(GeoQuery, self).__reduce__()
+            return (unpickle_geoquery, (), data)
 
     def clone(self, *args, **kwargs):
         obj = super(GeoQuery, self).clone(*args, **kwargs)
@@ -146,7 +155,9 @@ class GeoQuery(sql.Query):
             opts = self.model._meta
         aliases = set()
         only_load = self.deferred_to_columns()
-        proxied_model = opts.proxy and opts.proxy_for_model or 0
+        # Skip all proxy to the root proxied model
+        proxied_model = get_proxied_model(opts)
+
         if start_alias:
             seen = {None: start_alias}
         for field, model in opts.get_fields_with_model():
@@ -198,6 +209,10 @@ class GeoQuery(sql.Query):
         """
         values = []
         aliases = self.extra_select.keys()
+        if self.aggregates:
+            # If we have an aggregate annotation, must extend the aliases
+            # so their corresponding row values are included.
+            aliases.extend([None for i in xrange(len(self.aggregates))])
 
         # Have to set a starting row number offset that is used for
         # determining the correct starting row index -- needed for
@@ -218,7 +233,7 @@ class GeoQuery(sql.Query):
                 values.append(self.convert_values(value, field))
         else:
             values.extend(row[index_start:])
-        return values
+        return tuple(values)
 
     def convert_values(self, value, field):
         """
@@ -247,7 +262,10 @@ class GeoQuery(sql.Query):
         """
         if isinstance(aggregate, self.aggregates_module.GeoAggregate):
             if aggregate.is_extent:
-                return self.aggregates_module.convert_extent(value)
+                if aggregate.is_extent == '3D':
+                    return self.aggregates_module.convert_extent3d(value)
+                else:
+                    return self.aggregates_module.convert_extent(value)
             else:
                 return self.aggregates_module.convert_geom(value, aggregate.source)
         else:
@@ -332,3 +350,12 @@ class GeoQuery(sql.Query):
             # Otherwise, check by the given field name -- which may be
             # a lookup to a _related_ geographic field.
             return GeoWhereNode._check_geo_field(self.model._meta, field_name)
+
+if SpatialBackend.oracle:
+    def unpickle_geoquery():
+        """
+        Utility function, called by Python's unpickling machinery, that handles
+        unpickling of GeoQuery subclasses of OracleQuery.
+        """
+        return GeoQuery.__new__(GeoQuery)
+    unpickle_geoquery.__safe_for_unpickling__ = True

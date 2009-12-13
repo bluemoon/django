@@ -105,10 +105,9 @@ def get_commands():
         # Find the project directory
         try:
             from django.conf import settings
-            module = import_module(settings.SETTINGS_MODULE.split('.', 1)[0])
-            project_directory = setup_environ(module,
-                                                settings.SETTINGS_MODULE)
-        except (AttributeError, EnvironmentError, ImportError):
+            module = import_module(settings.SETTINGS_MODULE)
+            project_directory = setup_environ(module, settings.SETTINGS_MODULE)
+        except (AttributeError, EnvironmentError, ImportError, KeyError):
             project_directory = None
 
         # Find and load the management module for each installed app.
@@ -156,11 +155,11 @@ def call_command(name, *args, **options):
         raise CommandError, "Unknown command: %r" % name
 
     # Grab out a list of defaults from the options. optparse does this for us
-    # when the script runs from the command line, but since call_command can 
+    # when the script runs from the command line, but since call_command can
     # be called programatically, we need to simulate the loading and handling
     # of defaults (see #10080 for details).
     defaults = dict([(o.dest, o.default)
-                     for o in klass.option_list 
+                     for o in klass.option_list
                      if o.default is not NO_DEFAULT])
     defaults.update(options)
 
@@ -262,6 +261,82 @@ class ManagementUtility(object):
             sys.exit(1)
         return klass
 
+    def autocomplete(self):
+        """
+        Output completion suggestions for BASH.
+
+        The output of this function is passed to BASH's `COMREPLY` variable and
+        treated as completion suggestions. `COMREPLY` expects a space
+        separated string as the result.
+
+        The `COMP_WORDS` and `COMP_CWORD` BASH environment variables are used
+        to get information about the cli input. Please refer to the BASH
+        man-page for more information about this variables.
+
+        Subcommand options are saved as pairs. A pair consists of
+        the long option string (e.g. '--exclude') and a boolean
+        value indicating if the option requires arguments. When printing to
+        stdout, a equal sign is appended to options which require arguments.
+
+        Note: If debugging this function, it is recommended to write the debug
+        output in a separate file. Otherwise the debug output will be treated
+        and formatted as potential completion suggestions.
+        """
+        # Don't complete if user hasn't sourced bash_completion file.
+        if not os.environ.has_key('DJANGO_AUTO_COMPLETE'):
+            return
+
+        cwords = os.environ['COMP_WORDS'].split()[1:]
+        cword = int(os.environ['COMP_CWORD'])
+
+        try:
+            curr = cwords[cword-1]
+        except IndexError:
+            curr = ''
+
+        subcommands = get_commands().keys() + ['help']
+        options = [('--help', None)]
+
+        # subcommand
+        if cword == 1:
+            print ' '.join(sorted(filter(lambda x: x.startswith(curr), subcommands)))
+        # subcommand options
+        # special case: the 'help' subcommand has no options
+        elif cwords[0] in subcommands and cwords[0] != 'help':
+            subcommand_cls = self.fetch_command(cwords[0])
+            # special case: 'runfcgi' stores additional options as
+            # 'key=value' pairs
+            if cwords[0] == 'runfcgi':
+                from django.core.servers.fastcgi import FASTCGI_OPTIONS
+                options += [(k, 1) for k in FASTCGI_OPTIONS]
+            # special case: add the names of installed apps to options
+            elif cwords[0] in ('dumpdata', 'reset', 'sql', 'sqlall',
+                               'sqlclear', 'sqlcustom', 'sqlindexes',
+                               'sqlreset', 'sqlsequencereset', 'test'):
+                try:
+                    from django.conf import settings
+                    # Get the last part of the dotted path as the app name.
+                    options += [(a.split('.')[-1], 0) for a in settings.INSTALLED_APPS]
+                except ImportError:
+                    # Fail silently if DJANGO_SETTINGS_MODULE isn't set. The
+                    # user will find out once they execute the command.
+                    pass
+            options += [(s_opt.get_opt_string(), s_opt.nargs) for s_opt in
+                        subcommand_cls.option_list]
+            # filter out previously specified options from available options
+            prev_opts = [x.split('=')[0] for x in cwords[1:cword-1]]
+            options = filter(lambda (x, v): x not in prev_opts, options)
+
+            # filter options by current input
+            options = sorted([(k, v) for k, v in options if k.startswith(curr)])
+            for option in options:
+                opt_label = option[0]
+                # append '=' to options which require args
+                if option[1]:
+                    opt_label += '='
+                print opt_label
+        sys.exit(1)
+
     def execute(self):
         """
         Given the command-line arguments, this figures out which subcommand is
@@ -273,6 +348,7 @@ class ManagementUtility(object):
         parser = LaxOptionParser(usage="%prog subcommand [options] [args]",
                                  version=get_version(),
                                  option_list=BaseCommand.option_list)
+        self.autocomplete()
         try:
             options, args = parser.parse_args(self.argv)
             handle_default_options(options)
@@ -316,7 +392,11 @@ def setup_environ(settings_mod, original_settings_path=None):
     # Add this project to sys.path so that it's importable in the conventional
     # way. For example, if this file (manage.py) lives in a directory
     # "myproject", this code would add "/path/to/myproject" to sys.path.
-    project_directory, settings_filename = os.path.split(settings_mod.__file__)
+    if '__init__.py' in settings_mod.__file__:
+        p = os.path.dirname(settings_mod.__file__)
+    else:
+        p = settings_mod.__file__
+    project_directory, settings_filename = os.path.split(p)
     if project_directory == os.curdir or not project_directory:
         project_directory = os.getcwd()
     project_name = os.path.basename(project_directory)

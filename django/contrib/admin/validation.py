@@ -5,7 +5,7 @@ except NameError:
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import models
-from django.forms.models import BaseModelForm, BaseModelFormSet, fields_for_model
+from django.forms.models import BaseModelForm, BaseModelFormSet, fields_for_model, _get_foreign_key
 from django.contrib.admin.options import flatten_fieldsets, BaseModelAdmin
 from django.contrib.admin.options import HORIZONTAL, VERTICAL
 
@@ -67,10 +67,6 @@ def validate(cls, model):
     # list_editable
     if hasattr(cls, 'list_editable') and cls.list_editable:
         check_isseq(cls, 'list_editable', cls.list_editable)
-        if not (opts.ordering or cls.ordering):
-            raise ImproperlyConfigured("'%s.list_editable' cannot be used "
-                "without a default ordering. Please define ordering on either %s or %s."
-                % (cls.__name__, cls.__name__, model.__name__))
         for idx, field_name in enumerate(cls.list_editable):
             try:
                 field = opts.get_field_by_name(field_name)[0]
@@ -150,15 +146,19 @@ def validate(cls, model):
                 raise ImproperlyConfigured("'%s.inlines[%d].model' does not "
                         "inherit from models.Model." % (cls.__name__, idx))
             validate_base(inline, inline.model)
-            validate_inline(inline)
+            validate_inline(inline, cls, model)
 
-def validate_inline(cls):
+def validate_inline(cls, parent, parent_model):
+
     # model is already verified to exist and be a Model
     if cls.fk_name: # default value is None
         f = get_field(cls, cls.model, cls.model._meta, 'fk_name', cls.fk_name)
         if not isinstance(f, models.ForeignKey):
             raise ImproperlyConfigured("'%s.fk_name is not an instance of "
                     "models.ForeignKey." % cls.__name__)
+
+    fk = _get_foreign_key(parent_model, cls.model, fk_name=cls.fk_name, can_fail=True)
+
     # extra = 3
     # max_num = 0
     for attr in ('extra', 'max_num'):
@@ -170,6 +170,13 @@ def validate_inline(cls):
     if hasattr(cls, 'formset') and not issubclass(cls.formset, BaseModelFormSet):
         raise ImproperlyConfigured("'%s.formset' does not inherit from "
                 "BaseModelFormSet." % cls.__name__)
+
+    # exclude
+    if hasattr(cls, 'exclude') and cls.exclude:
+        if fk and fk.name in cls.exclude:
+            raise ImproperlyConfigured("%s cannot exclude the field "
+                    "'%s' - this is the foreign key to the parent model "
+                    "%s." % (cls.__name__, fk.name, parent_model.__name__))
 
 def validate_base(cls, model):
     opts = model._meta
@@ -189,6 +196,11 @@ def validate_base(cls, model):
         check_isseq(cls, 'fields', cls.fields)
         for field in cls.fields:
             check_formfield(cls, model, opts, 'fields', field)
+            f = get_field(cls, model, opts, 'fields', field)
+            if isinstance(f, models.ManyToManyField) and not f.rel.through._meta.auto_created:
+                raise ImproperlyConfigured("'%s.fields' can't include the ManyToManyField "
+                    "field '%s' because '%s' manually specifies "
+                    "a 'through' model." % (cls.__name__, field, field))
         if cls.fieldsets:
             raise ImproperlyConfigured('Both fieldsets and fields are specified in %s.' % cls.__name__)
         if len(cls.fields) > len(set(cls.fields)):
@@ -207,11 +219,28 @@ def validate_base(cls, model):
                 raise ImproperlyConfigured("'fields' key is required in "
                         "%s.fieldsets[%d][1] field options dict."
                         % (cls.__name__, idx))
+            for fields in fieldset[1]['fields']:
+                # The entry in fields might be a tuple. If it is a standalone
+                # field, make it into a tuple to make processing easier.
+                if type(fields) != tuple:
+                    fields = (fields,)
+                for field in fields:
+                    check_formfield(cls, model, opts, "fieldsets[%d][1]['fields']" % idx, field)
+                    try:
+                        f = opts.get_field(field)
+                        if isinstance(f, models.ManyToManyField) and not f.rel.through._meta.auto_created:
+                            raise ImproperlyConfigured("'%s.fieldsets[%d][1]['fields']' "
+                                "can't include the ManyToManyField field '%s' because "
+                                "'%s' manually specifies a 'through' model." % (
+                                    cls.__name__, idx, field, field))
+                    except models.FieldDoesNotExist:
+                        # If we can't find a field on the model that matches,
+                        # it could be an extra field on the form.
+                        pass
         flattened_fieldsets = flatten_fieldsets(cls.fieldsets)
         if len(flattened_fieldsets) > len(set(flattened_fieldsets)):
             raise ImproperlyConfigured('There are duplicate field(s) in %s.fieldsets' % cls.__name__)
-        for field in flattened_fieldsets:
-            check_formfield(cls, model, opts, "fieldsets[%d][1]['fields']" % idx, field)
+
 
     # form
     if hasattr(cls, 'form') and not issubclass(cls.form, BaseModelForm):

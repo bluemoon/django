@@ -82,6 +82,87 @@ class MyPersonProxy(MyPerson):
 class LowerStatusPerson(MyPersonProxy):
     status = models.CharField(max_length=80)
 
+class User(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __unicode__(self):
+        return self.name
+
+class UserProxy(User):
+    class Meta:
+        proxy = True
+
+class UserProxyProxy(UserProxy):
+    class Meta:
+        proxy = True
+
+# We can still use `select_related()` to include related models in our querysets.
+class Country(models.Model):
+	name = models.CharField(max_length=50)
+
+class State(models.Model):
+	name = models.CharField(max_length=50)
+	country = models.ForeignKey(Country)
+
+	def __unicode__(self):
+		return self.name
+
+class StateProxy(State):
+	class Meta:
+		proxy = True
+
+# Proxy models still works with filters (on related fields)
+# and select_related, even when mixed with model inheritance
+class BaseUser(models.Model):
+    name = models.CharField(max_length=255)
+
+class TrackerUser(BaseUser):
+    status = models.CharField(max_length=50)
+
+class ProxyTrackerUser(TrackerUser):
+    class Meta:
+        proxy = True
+
+
+class Issue(models.Model):
+    summary = models.CharField(max_length=255)
+    assignee = models.ForeignKey(TrackerUser)
+
+    def __unicode__(self):
+        return ':'.join((self.__class__.__name__,self.summary,))
+
+class Bug(Issue):
+    version = models.CharField(max_length=50)
+    reporter = models.ForeignKey(BaseUser)
+
+class ProxyBug(Bug):
+    """
+    Proxy of an inherited class
+    """
+    class Meta:
+        proxy = True
+
+
+class ProxyProxyBug(ProxyBug):
+    """
+    A proxy of proxy model with related field
+    """
+    class Meta:
+        proxy = True
+
+class Improvement(Issue):
+    """
+    A model that has relation to a proxy model
+    or to a proxy of proxy model
+    """
+    version = models.CharField(max_length=50)
+    reporter = models.ForeignKey(ProxyTrackerUser)
+    associated_bug = models.ForeignKey(ProxyProxyBug)
+
+class ProxyImprovement(Improvement):
+    class Meta:
+        proxy = True
+
 __test__ = {'API_TESTS' : """
 # The MyPerson model should be generating the same database queries as the
 # Person model (when the same manager is used in each case).
@@ -118,6 +199,11 @@ False
 >>> _ = LowerStatusPerson.objects.create(status="low", name="homer")
 >>> LowerStatusPerson.objects.all()
 [<LowerStatusPerson: homer>]
+
+# Correct type when querying a proxy of proxy
+
+>>> MyPersonProxy.objects.all()
+[<MyPersonProxy: Bazza del Frob>, <MyPersonProxy: Foo McBar>, <MyPersonProxy: homer>]
 
 # And now for some things that shouldn't work...
 #
@@ -173,11 +259,113 @@ FieldError: Proxy model 'NoNewFields' contains model fields.
 >>> OtherPerson._default_manager.all()
 [<OtherPerson: barney>, <OtherPerson: wilma>]
 
+# Test save signals for proxy models
+>>> from django.db.models import signals
+>>> def make_handler(model, event):
+...     def _handler(*args, **kwargs):
+...         print u"%s %s save" % (model, event)
+...     return _handler
+>>> h1 = make_handler('MyPerson', 'pre')
+>>> h2 = make_handler('MyPerson', 'post')
+>>> h3 = make_handler('Person', 'pre')
+>>> h4 = make_handler('Person', 'post')
+>>> signals.pre_save.connect(h1, sender=MyPerson)
+>>> signals.post_save.connect(h2, sender=MyPerson)
+>>> signals.pre_save.connect(h3, sender=Person)
+>>> signals.post_save.connect(h4, sender=Person)
+>>> dino = MyPerson.objects.create(name=u"dino")
+MyPerson pre save
+MyPerson post save
+
+# Test save signals for proxy proxy models
+>>> h5 = make_handler('MyPersonProxy', 'pre')
+>>> h6 = make_handler('MyPersonProxy', 'post')
+>>> signals.pre_save.connect(h5, sender=MyPersonProxy)
+>>> signals.post_save.connect(h6, sender=MyPersonProxy)
+>>> dino = MyPersonProxy.objects.create(name=u"pebbles")
+MyPersonProxy pre save
+MyPersonProxy post save
+
+>>> signals.pre_save.disconnect(h1, sender=MyPerson)
+>>> signals.post_save.disconnect(h2, sender=MyPerson)
+>>> signals.pre_save.disconnect(h3, sender=Person)
+>>> signals.post_save.disconnect(h4, sender=Person)
+>>> signals.pre_save.disconnect(h5, sender=MyPersonProxy)
+>>> signals.post_save.disconnect(h6, sender=MyPersonProxy)
+
 # A proxy has the same content type as the model it is proxying for (at the
 # storage level, it is meant to be essentially indistinguishable).
 >>> ctype = ContentType.objects.get_for_model
 >>> ctype(Person) is ctype(OtherPerson)
 True
+
+>>> MyPersonProxy.objects.all()
+[<MyPersonProxy: barney>, <MyPersonProxy: dino>, <MyPersonProxy: fred>, <MyPersonProxy: pebbles>]
+
+>>> u = User.objects.create(name='Bruce')
+>>> User.objects.all()
+[<User: Bruce>]
+>>> UserProxy.objects.all()
+[<UserProxy: Bruce>]
+>>> UserProxyProxy.objects.all()
+[<UserProxyProxy: Bruce>]
+
+# Proxy objects can be deleted
+>>> u2 = UserProxy.objects.create(name='George')
+>>> UserProxy.objects.all()
+[<UserProxy: Bruce>, <UserProxy: George>]
+>>> u2.delete()
+>>> UserProxy.objects.all()
+[<UserProxy: Bruce>]
+
+
+# We can still use `select_related()` to include related models in our querysets.
+>>> country = Country.objects.create(name='Australia')
+>>> state = State.objects.create(name='New South Wales', country=country)
+
+>>> State.objects.select_related()
+[<State: New South Wales>]
+>>> StateProxy.objects.select_related()
+[<StateProxy: New South Wales>]
+>>> StateProxy.objects.get(name='New South Wales')
+<StateProxy: New South Wales>
+>>> StateProxy.objects.select_related().get(name='New South Wales')
+<StateProxy: New South Wales>
+
+>>> contributor = TrackerUser.objects.create(name='Contributor',status='contrib')
+>>> someone = BaseUser.objects.create(name='Someone')
+>>> _ = Bug.objects.create(summary='fix this', version='1.1beta',
+...                        assignee=contributor, reporter=someone)
+>>> pcontributor = ProxyTrackerUser.objects.create(name='OtherContributor',
+...                                                status='proxy')
+>>> _ = Improvement.objects.create(summary='improve that', version='1.1beta',
+...                                assignee=contributor, reporter=pcontributor,
+...                                associated_bug=ProxyProxyBug.objects.all()[0])
+
+# Related field filter on proxy
+>>> ProxyBug.objects.get(version__icontains='beta')
+<ProxyBug: ProxyBug:fix this>
+
+# Select related + filter on proxy
+>>> ProxyBug.objects.select_related().get(version__icontains='beta')
+<ProxyBug: ProxyBug:fix this>
+
+# Proxy of proxy, select_related + filter
+>>> ProxyProxyBug.objects.select_related().get(version__icontains='beta')
+<ProxyProxyBug: ProxyProxyBug:fix this>
+
+# Select related + filter on a related proxy field
+>>> ProxyImprovement.objects.select_related().get(reporter__name__icontains='butor')
+<ProxyImprovement: ProxyImprovement:improve that>
+
+# Select related + filter on a related proxy of proxy field
+>>> ProxyImprovement.objects.select_related().get(associated_bug__summary__icontains='fix')
+<ProxyImprovement: ProxyImprovement:improve that>
+
+Proxy models can be loaded from fixtures (Regression for #11194)
+>>> from django.core import management
+>>> management.call_command('loaddata', 'mypeople.json', verbosity=0)
+>>> MyPerson.objects.get(pk=100)
+<MyPerson: Elvis Presley>
+
 """}
-
-

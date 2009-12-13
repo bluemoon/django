@@ -6,10 +6,10 @@ and database field objects.
 from django.utils.encoding import smart_unicode, force_unicode
 from django.utils.datastructures import SortedDict
 from django.utils.text import get_text_list, capfirst
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import ugettext_lazy as _, ugettext
 
 from util import ValidationError, ErrorList
-from forms import BaseForm, get_declared_fields
+from forms import BaseForm, get_declared_fields, NON_FIELD_ERRORS
 from fields import Field, ChoiceField, IntegerField, EMPTY_VALUES
 from widgets import Select, SelectMultiple, HiddenInput, MultipleHiddenInput
 from widgets import media_property
@@ -50,14 +50,14 @@ def save_instance(form, instance, fields=None, fail_message='saved',
             continue
         if exclude and f.name in exclude:
             continue
+        # OneToOneField doesn't allow assignment of None. Guard against that
+        # instead of allowing it and throwing an error.
+        if isinstance(f, models.OneToOneField) and cleaned_data[f.name] is None:
+            continue
         # Defer saving file-type fields until after the other fields, so a
         # callable upload_to can use the values from other fields.
         if isinstance(f, models.FileField):
             file_field_list.append(f)
-        # OneToOneField doesn't allow assignment of None. Guard against that
-        # instead of allowing it and throwing an error.
-        if isinstance(f, models.OneToOneField) and cleaned_data[f.name] is None:
-            pass
         else:
             f.save_form_data(instance, cleaned_data[f.name])
 
@@ -225,11 +225,32 @@ class BaseModelForm(BaseForm):
             object_data.update(initial)
         super(BaseModelForm, self).__init__(data, files, auto_id, prefix, object_data,
                                             error_class, label_suffix, empty_permitted)
+
     def clean(self):
         self.validate_unique()
         return self.cleaned_data
 
     def validate_unique(self):
+        unique_checks, date_checks = self._get_unique_checks()
+        form_errors = []
+        bad_fields = set()
+
+        field_errors, global_errors = self._perform_unique_checks(unique_checks)
+        bad_fields.union(field_errors)
+        form_errors.extend(global_errors)
+
+        field_errors, global_errors = self._perform_date_checks(date_checks)
+        bad_fields.union(field_errors)
+        form_errors.extend(global_errors)
+
+        for field_name in bad_fields:
+            del self.cleaned_data[field_name]
+        if form_errors:
+            # Raise the unique together errors since they are considered
+            # form-wide.
+            raise ValidationError(form_errors)
+
+    def _get_unique_checks(self):
         from django.db.models.fields import FieldDoesNotExist, Field as ModelField
 
         # Gather a list of checks to perform. We only perform unique checks
@@ -239,16 +260,16 @@ class BaseModelForm(BaseForm):
         # not make sense to check data that didn't validate, and since NULL does not
         # equal NULL in SQL we should not do any unique checking for NULL values.
         unique_checks = []
+        # these are checks for the unique_for_<date/year/month>
+        date_checks = []
         for check in self.instance._meta.unique_together[:]:
             fields_on_form = [field for field in check if self.cleaned_data.get(field) is not None]
             if len(fields_on_form) == len(check):
                 unique_checks.append(check)
 
-        form_errors = []
-
         # Gather a list of checks for fields declared as unique and add them to
         # the list of checks. Again, skip empty fields and any that did not validate.
-        for name, field in self.fields.items():
+        for name in self.fields:
             try:
                 f = self.instance._meta.get_field_by_name(name)[0]
             except FieldDoesNotExist:
@@ -260,10 +281,23 @@ class BaseModelForm(BaseForm):
                 # get_field_by_name found it, but it is not a Field so do not proceed
                 # to use it as if it were.
                 continue
-            if f.unique and self.cleaned_data.get(name) is not None:
+            if self.cleaned_data.get(name) is None:
+                continue
+            if f.unique:
                 unique_checks.append((name,))
+            if f.unique_for_date and self.cleaned_data.get(f.unique_for_date) is not None:
+                date_checks.append(('date', name, f.unique_for_date))
+            if f.unique_for_year and self.cleaned_data.get(f.unique_for_year) is not None:
+                date_checks.append(('year', name, f.unique_for_year))
+            if f.unique_for_month and self.cleaned_data.get(f.unique_for_month) is not None:
+                date_checks.append(('month', name, f.unique_for_month))
+        return unique_checks, date_checks
 
+
+    def _perform_unique_checks(self, unique_checks):
         bad_fields = set()
+        form_errors = []
+
         for unique_check in unique_checks:
             # Try to look up an existing object with the same values as this
             # object's values for all the unique field.
@@ -285,42 +319,73 @@ class BaseModelForm(BaseForm):
             if self.instance.pk is not None:
                 qs = qs.exclude(pk=self.instance.pk)
 
-            # This cute trick with extra/values is the most efficient way to
-            # tell if a particular query returns any results.
-            if qs.extra(select={'a': 1}).values('a').order_by():
-                model_name = capfirst(self.instance._meta.verbose_name)
-
-                # A unique field
+            if qs.exists():
                 if len(unique_check) == 1:
-                    field_name = unique_check[0]
-                    field_label = self.fields[field_name].label
-                    # Insert the error into the error dict, very sneaky
-                    self._errors[field_name] = ErrorList([
-                        _(u"%(model_name)s with this %(field_label)s already exists.") % \
-                        {'model_name': unicode(model_name),
-                         'field_label': unicode(field_label)}
-                    ])
-                # unique_together
+                    self._errors[unique_check[0]] = ErrorList([self.unique_error_message(unique_check)])
                 else:
-                    field_labels = [self.fields[field_name].label for field_name in unique_check]
-                    field_labels = get_text_list(field_labels, _('and'))
-                    form_errors.append(
-                        _(u"%(model_name)s with this %(field_label)s already exists.") % \
-                        {'model_name': unicode(model_name),
-                         'field_label': unicode(field_labels)}
-                    )
+                    form_errors.append(self.unique_error_message(unique_check))
 
                 # Mark these fields as needing to be removed from cleaned data
                 # later.
                 for field_name in unique_check:
                     bad_fields.add(field_name)
+        return bad_fields, form_errors
 
-        for field_name in bad_fields:
-            del self.cleaned_data[field_name]
-        if form_errors:
-            # Raise the unique together errors since they are considered
-            # form-wide.
-            raise ValidationError(form_errors)
+    def _perform_date_checks(self, date_checks):
+        bad_fields = set()
+        for lookup_type, field, unique_for in date_checks:
+            lookup_kwargs = {}
+            # there's a ticket to add a date lookup, we can remove this special
+            # case if that makes it's way in
+            if lookup_type == 'date':
+                date = self.cleaned_data[unique_for]
+                lookup_kwargs['%s__day' % unique_for] = date.day
+                lookup_kwargs['%s__month' % unique_for] = date.month
+                lookup_kwargs['%s__year' % unique_for] = date.year
+            else:
+                lookup_kwargs['%s__%s' % (unique_for, lookup_type)] = getattr(self.cleaned_data[unique_for], lookup_type)
+            lookup_kwargs[field] = self.cleaned_data[field]
+
+            qs = self.instance.__class__._default_manager.filter(**lookup_kwargs)
+            # Exclude the current object from the query if we are editing an
+            # instance (as opposed to creating a new one)
+            if self.instance.pk is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+
+            if qs.exists():
+                self._errors[field] = ErrorList([
+                    self.date_error_message(lookup_type, field, unique_for)
+                ])
+                bad_fields.add(field)
+        return bad_fields, []
+
+    def date_error_message(self, lookup_type, field, unique_for):
+        return _(u"%(field_name)s must be unique for %(date_field)s %(lookup)s.") % {
+            'field_name': unicode(self.fields[field].label),
+            'date_field': unicode(self.fields[unique_for].label),
+            'lookup': lookup_type,
+        }
+
+    def unique_error_message(self, unique_check):
+        model_name = capfirst(self.instance._meta.verbose_name)
+
+        # A unique field
+        if len(unique_check) == 1:
+            field_name = unique_check[0]
+            field_label = self.fields[field_name].label
+            # Insert the error into the error dict, very sneaky
+            return _(u"%(model_name)s with this %(field_label)s already exists.") %  {
+                'model_name': unicode(model_name),
+                'field_label': unicode(field_label)
+            }
+        # unique_together
+        else:
+            field_labels = [self.fields[field_name].label for field_name in unique_check]
+            field_labels = get_text_list(field_labels, _('and'))
+            return _(u"%(model_name)s with this %(field_label)s already exists.") %  {
+                'model_name': unicode(model_name),
+                'field_label': unicode(field_labels)
+            }
 
     def save(self, commit=True):
         """
@@ -344,16 +409,34 @@ class ModelForm(BaseModelForm):
 
 def modelform_factory(model, form=ModelForm, fields=None, exclude=None,
                        formfield_callback=lambda f: f.formfield()):
-    # HACK: we should be able to construct a ModelForm without creating
-    # and passing in a temporary inner class
-    class Meta:
-        pass
-    setattr(Meta, 'model', model)
-    setattr(Meta, 'fields', fields)
-    setattr(Meta, 'exclude', exclude)
+    # Create the inner Meta class. FIXME: ideally, we should be able to
+    # construct a ModelForm without creating and passing in a temporary
+    # inner class.
+
+    # Build up a list of attributes that the Meta object will have.
+    attrs = {'model': model}
+    if fields is not None:
+        attrs['fields'] = fields
+    if exclude is not None:
+        attrs['exclude'] = exclude
+
+    # If parent form class already has an inner Meta, the Meta we're
+    # creating needs to inherit from the parent's inner meta.
+    parent = (object,)
+    if hasattr(form, 'Meta'):
+        parent = (form.Meta, object)
+    Meta = type('Meta', parent, attrs)
+
+    # Give this new form class a reasonable name.
     class_name = model.__name__ + 'Form'
-    return ModelFormMetaclass(class_name, (form,), {'Meta': Meta,
-                              'formfield_callback': formfield_callback})
+
+    # Class attributes for the new form class.
+    form_class_attrs = {
+        'Meta': Meta,
+        'formfield_callback': formfield_callback
+    }
+
+    return ModelFormMetaclass(class_name, (form,), form_class_attrs)
 
 
 # ModelFormSets ##############################################################
@@ -377,8 +460,21 @@ class BaseModelFormSet(BaseFormSet):
             return len(self.get_queryset())
         return super(BaseModelFormSet, self).initial_form_count()
 
+    def _existing_object(self, pk):
+        if not hasattr(self, '_object_dict'):
+            self._object_dict = dict([(o.pk, o) for o in self.get_queryset()])
+        return self._object_dict.get(pk)
+
     def _construct_form(self, i, **kwargs):
-        if i < self.initial_form_count():
+        if self.is_bound and i < self.initial_form_count():
+            pk_key = "%s-%s" % (self.add_prefix(i), self.model._meta.pk.name)
+            pk = self.data[pk_key]
+            pk_field = self.model._meta.pk
+            pk = pk_field.get_db_prep_lookup('exact', pk)
+            if isinstance(pk, list):
+                pk = pk[0]
+            kwargs['instance'] = self._existing_object(pk)
+        if i < self.initial_form_count() and not kwargs.get('instance'):
             kwargs['instance'] = self.get_queryset()[i]
         return super(BaseModelFormSet, self)._construct_form(i, **kwargs)
 
@@ -388,6 +484,13 @@ class BaseModelFormSet(BaseFormSet):
                 qs = self.queryset
             else:
                 qs = self.model._default_manager.get_query_set()
+
+            # If the queryset isn't already ordered we need to add an
+            # artificial ordering here to make sure that all formsets
+            # constructed from this queryset have the same form order.
+            if not qs.ordered:
+                qs = qs.order_by(self.model._meta.pk.name)
+
             if self.max_num > 0:
                 self._queryset = qs[:self.max_num]
             else:
@@ -414,22 +517,113 @@ class BaseModelFormSet(BaseFormSet):
             self.save_m2m = save_m2m
         return self.save_existing_objects(commit) + self.save_new_objects(commit)
 
+    def clean(self):
+        self.validate_unique()
+
+    def validate_unique(self):
+        # Iterate over the forms so that we can find one with potentially valid
+        # data from which to extract the error checks
+        for form in self.forms:
+            if hasattr(form, 'cleaned_data'):
+                break
+        else:
+            return
+        unique_checks, date_checks = form._get_unique_checks()
+        errors = []
+        # Do each of the unique checks (unique and unique_together)
+        for unique_check in unique_checks:
+            seen_data = set()
+            for form in self.forms:
+                # if the form doesn't have cleaned_data then we ignore it,
+                # it's already invalid
+                if not hasattr(form, "cleaned_data"):
+                    continue
+                # get each of the fields for which we have data on this form
+                if [f for f in unique_check if f in form.cleaned_data and form.cleaned_data[f] is not None]:
+                    # get the data itself
+                    row_data = tuple([form.cleaned_data[field] for field in unique_check])
+                    # if we've aready seen it then we have a uniqueness failure
+                    if row_data in seen_data:
+                        # poke error messages into the right places and mark
+                        # the form as invalid
+                        errors.append(self.get_unique_error_message(unique_check))
+                        form._errors[NON_FIELD_ERRORS] = self.get_form_error()
+                        del form.cleaned_data
+                        break
+                    # mark the data as seen
+                    seen_data.add(row_data)
+        # iterate over each of the date checks now
+        for date_check in date_checks:
+            seen_data = set()
+            lookup, field, unique_for = date_check
+            for form in self.forms:
+                # if the form doesn't have cleaned_data then we ignore it,
+                # it's already invalid
+                if not hasattr(self, 'cleaned_data'):
+                    continue
+                # see if we have data for both fields
+                if (form.cleaned_data and form.cleaned_data[field] is not None
+                    and form.cleaned_data[unique_for] is not None):
+                    # if it's a date lookup we need to get the data for all the fields
+                    if lookup == 'date':
+                        date = form.cleaned_data[unique_for]
+                        date_data = (date.year, date.month, date.day)
+                    # otherwise it's just the attribute on the date/datetime
+                    # object
+                    else:
+                        date_data = (getattr(form.cleaned_data[unique_for], lookup),)
+                    data = (form.cleaned_data[field],) + date_data
+                    # if we've aready seen it then we have a uniqueness failure
+                    if data in seen_data:
+                        # poke error messages into the right places and mark
+                        # the form as invalid
+                        errors.append(self.get_date_error_message(date_check))
+                        form._errors[NON_FIELD_ERRORS] = self.get_form_error()
+                        del form.cleaned_data
+                        break
+                    seen_data.add(data)
+        if errors:
+            raise ValidationError(errors)
+
+    def get_unique_error_message(self, unique_check):
+        if len(unique_check) == 1:
+            return ugettext("Please correct the duplicate data for %(field)s.") % {
+                "field": unique_check[0],
+            }
+        else:
+            return ugettext("Please correct the duplicate data for %(field)s, "
+                "which must be unique.") % {
+                    "field": get_text_list(unique_check, unicode(_("and"))),
+                }
+
+    def get_date_error_message(self, date_check):
+        return ugettext("Please correct the duplicate data for %(field_name)s "
+            "which must be unique for the %(lookup)s in %(date_field)s.") % {
+            'field_name': date_check[1],
+            'date_field': date_check[2],
+            'lookup': unicode(date_check[0]),
+        }
+
+    def get_form_error(self):
+        return ugettext("Please correct the duplicate values below.")
+
     def save_existing_objects(self, commit=True):
         self.changed_objects = []
         self.deleted_objects = []
         if not self.get_queryset():
             return []
 
-        # Put the objects from self.get_queryset into a dict so they are easy to lookup by pk
-        existing_objects = {}
-        for obj in self.get_queryset():
-            existing_objects[obj.pk] = obj
         saved_instances = []
         for form in self.initial_forms:
             pk_name = self._pk_field.name
             raw_pk_value = form._raw_value(pk_name)
-            pk_value = form.fields[pk_name].clean(raw_pk_value).pk
-            obj = existing_objects[pk_value]
+
+            # clean() for different types of PK fields can sometimes return
+            # the model instance, and sometimes the PK. Handle either.
+            pk_value = form.fields[pk_name].clean(raw_pk_value)
+            pk_value = getattr(pk_value, 'pk', pk_value)
+
+            obj = self._existing_object(pk_value)
             if self.can_delete:
                 raw_delete_value = form._raw_value(DELETION_FIELD_NAME)
                 should_delete = form.fields[DELETION_FIELD_NAME].clean(raw_delete_value)
@@ -470,11 +664,17 @@ class BaseModelFormSet(BaseFormSet):
         # data back. Generally, pk.editable should be false, but for some
         # reason, auto_created pk fields and AutoField's editable attribute is
         # True, so check for that as well.
-        if (not pk.editable) or (pk.auto_created or isinstance(pk, AutoField)):
-            try:
-                pk_value = self.get_queryset()[index].pk
-            except IndexError:
-                pk_value = None
+        def pk_is_not_editable(pk):
+            return ((not pk.editable) or (pk.auto_created or isinstance(pk, AutoField))
+                or (pk.rel and pk.rel.parent_link and pk_is_not_editable(pk.rel.to._meta.pk)))
+        if pk_is_not_editable(pk) or pk.name not in form.fields:
+            if form.is_bound:
+                pk_value = form.instance.pk
+            else:
+                try:
+                    pk_value = self.get_queryset()[index].pk
+                except IndexError:
+                    pk_value = None
             if isinstance(pk, OneToOneField) or isinstance(pk, ForeignKey):
                 qs = pk.rel.to._default_manager.get_query_set()
             else:
@@ -505,13 +705,17 @@ class BaseInlineFormSet(BaseModelFormSet):
                  save_as_new=False, prefix=None):
         from django.db.models.fields.related import RelatedObject
         if instance is None:
-            self.instance = self.model()
+            self.instance = self.fk.rel.to()
         else:
             self.instance = instance
         self.save_as_new = save_as_new
         # is there a better way to get the object descriptor?
         self.rel_name = RelatedObject(self.fk.rel.to, self.model, self.fk).get_accessor_name()
-        qs = self.model._default_manager.filter(**{self.fk.name: self.instance})
+        if self.fk.rel.field_name == self.fk.rel.to._meta.pk.name:
+            backlink_value = self.instance
+        else:
+            backlink_value = getattr(self.instance, self.fk.rel.field_name)
+        qs = self.model._default_manager.filter(**{self.fk.name: backlink_value})
         super(BaseInlineFormSet, self).__init__(data, files, prefix=prefix,
                                                 queryset=qs)
 
@@ -546,8 +750,10 @@ class BaseInlineFormSet(BaseModelFormSet):
         # Use commit=False so we can assign the parent key afterwards, then
         # save the object.
         obj = form.save(commit=False)
-        setattr(obj, self.fk.get_attname(), self.instance.pk)
-        obj.save()
+        pk_value = getattr(self.instance, self.fk.rel.field_name)
+        setattr(obj, self.fk.get_attname(), getattr(pk_value, 'pk', pk_value))
+        if commit:
+            obj.save()
         # form.save_m2m() can be called via the formset later on if commit=False
         if commit and hasattr(form, 'save_m2m'):
             form.save_m2m()
@@ -560,14 +766,24 @@ class BaseInlineFormSet(BaseModelFormSet):
         else:
             # The foreign key field might not be on the form, so we poke at the
             # Model field to get the label, since we need that for error messages.
-            form.fields[self.fk.name] = InlineForeignKeyField(self.instance,
-                label=getattr(form.fields.get(self.fk.name), 'label', capfirst(self.fk.verbose_name))
-            )
+            kwargs = {
+                'label': getattr(form.fields.get(self.fk.name), 'label', capfirst(self.fk.verbose_name))
+            }
+            if self.fk.rel.field_name != self.fk.rel.to._meta.pk.name:
+                kwargs['to_field'] = self.fk.rel.field_name
+            form.fields[self.fk.name] = InlineForeignKeyField(self.instance, **kwargs)
 
-def _get_foreign_key(parent_model, model, fk_name=None):
+    def get_unique_error_message(self, unique_check):
+        unique_check = [field for field in unique_check if field != self.fk.name]
+        return super(BaseInlineFormSet, self).get_unique_error_message(unique_check)
+
+def _get_foreign_key(parent_model, model, fk_name=None, can_fail=False):
     """
-    Finds and returns the ForeignKey from model to parent if there is one.
-    If fk_name is provided, assume it is the name of the ForeignKey field.
+    Finds and returns the ForeignKey from model to parent if there is one
+    (returns None if can_fail is True and no such field exists). If fk_name is
+    provided, assume it is the name of the ForeignKey field. Unles can_fail is
+    True, an exception is raised if there is no ForeignKey from model to
+    parent_model.
     """
     # avoid circular import
     from django.db.models import ForeignKey
@@ -593,6 +809,8 @@ def _get_foreign_key(parent_model, model, fk_name=None):
         if len(fks_to_parent) == 1:
             fk = fks_to_parent[0]
         elif len(fks_to_parent) == 0:
+            if can_fail:
+                return
             raise Exception("%s has no ForeignKey to %s" % (model, parent_model))
         else:
             raise Exception("%s has more than 1 ForeignKey to %s" % (model, parent_model))
@@ -614,13 +832,6 @@ def inlineformset_factory(parent_model, model, form=ModelForm,
     # enforce a max_num=1 when the foreign key to the parent model is unique.
     if fk.unique:
         max_num = 1
-    if fields is not None:
-        fields = list(fields)
-        fields.append(fk.name)
-    else:
-        # get all the fields for this model that will be generated.
-        fields = fields_for_model(model, fields, exclude, formfield_callback).keys()
-        fields.append(fk.name)
     kwargs = {
         'form': form,
         'formfield_callback': formfield_callback,
@@ -655,8 +866,12 @@ class InlineForeignKeyField(Field):
     def __init__(self, parent_instance, *args, **kwargs):
         self.parent_instance = parent_instance
         self.pk_field = kwargs.pop("pk_field", False)
+        self.to_field = kwargs.pop("to_field", None)
         if self.parent_instance is not None:
-            kwargs["initial"] = self.parent_instance.pk
+            if self.to_field:
+                kwargs["initial"] = getattr(self.parent_instance, self.to_field)
+            else:
+                kwargs["initial"] = self.parent_instance.pk
         kwargs["required"] = False
         kwargs["widget"] = InlineForeignKeyHiddenInput
         super(InlineForeignKeyField, self).__init__(*args, **kwargs)
@@ -668,7 +883,11 @@ class InlineForeignKeyField(Field):
             # if there is no value act as we did before.
             return self.parent_instance
         # ensure the we compare the values as equal types.
-        if force_unicode(value) != force_unicode(self.parent_instance.pk):
+        if self.to_field:
+            orig = getattr(self.parent_instance, self.to_field)
+        else:
+            orig = self.parent_instance.pk
+        if force_unicode(value) != force_unicode(orig):
             raise ValidationError(self.error_messages['invalid_choice'])
         return self.parent_instance
 
@@ -691,6 +910,9 @@ class ModelChoiceIterator(object):
             for obj in self.queryset.all():
                 yield self.choice(obj)
 
+    def __len__(self):
+        return len(self.queryset)
+
     def choice(self, obj):
         if self.field.to_field_name:
             key = obj.serializable_value(self.field.to_field_name)
@@ -711,7 +933,10 @@ class ModelChoiceField(ChoiceField):
     def __init__(self, queryset, empty_label=u"---------", cache_choices=False,
                  required=True, widget=None, label=None, initial=None,
                  help_text=None, to_field_name=None, *args, **kwargs):
-        self.empty_label = empty_label
+        if required and (initial is not None):
+            self.empty_label = None
+        else:
+            self.empty_label = empty_label
         self.cache_choices = cache_choices
 
         # Call Field instead of ChoiceField __init__() because we don't need
@@ -794,14 +1019,14 @@ class ModelMultipleChoiceField(ModelChoiceField):
             return []
         if not isinstance(value, (list, tuple)):
             raise ValidationError(self.error_messages['list'])
-        final_values = []
-        for val in value:
+        for pk in value:
             try:
-                obj = self.queryset.get(pk=val)
-            except self.queryset.model.DoesNotExist:
-                raise ValidationError(self.error_messages['invalid_choice'] % val)
+                self.queryset.filter(pk=pk)
             except ValueError:
-                raise ValidationError(self.error_messages['invalid_pk_value'] % val)
-            else:
-                final_values.append(obj)
-        return final_values
+                raise ValidationError(self.error_messages['invalid_pk_value'] % pk)
+        qs = self.queryset.filter(pk__in=value)
+        pks = set([force_unicode(o.pk) for o in qs])
+        for val in value:
+            if force_unicode(val) not in pks:
+                raise ValidationError(self.error_messages['invalid_choice'] % val)
+        return qs

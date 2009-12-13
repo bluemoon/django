@@ -767,6 +767,13 @@ u'example@valid-----hyphens.com'
 >>> f.clean('example@valid-with-hyphens.com')
 u'example@valid-with-hyphens.com'
 
+# Check for runaway regex security problem. This will take for-freeking-ever
+# if the security fix isn't in place.
+>>> f.clean('viewx3dtextx26qx3d@yahoo.comx26latlngx3d15854521645943074058')
+Traceback (most recent call last):
+    ...
+ValidationError: [u'Enter a valid e-mail address.']
+
 >>> f = EmailField(required=False)
 >>> f.clean('')
 u''
@@ -972,6 +979,32 @@ ValidationError: [u'Enter a valid URL.']
 Traceback (most recent call last):
 ...
 ValidationError: [u'Enter a valid URL.']
+>>> f.clean('.')
+Traceback (most recent call last):
+...
+ValidationError: [u'Enter a valid URL.']
+>>> f.clean('com.')
+Traceback (most recent call last):
+...
+ValidationError: [u'Enter a valid URL.']
+>>> f.clean('http://example.com.')
+u'http://example.com./'
+>>> f.clean('example.com.')
+u'http://example.com./'
+
+# hangs "forever" if catastrophic backtracking in ticket:#11198 not fixed
+>>> f.clean('http://%s' % ("X"*200,))
+Traceback (most recent call last):
+...
+ValidationError: [u'Enter a valid URL.']
+
+# a second test, to make sure the problem is really addressed, even on 
+# domains that don't fail the domain label length check in the regex
+>>> f.clean('http://%s' % ("X"*60,))
+Traceback (most recent call last):
+...
+ValidationError: [u'Enter a valid URL.']
+
 >>> f.clean('http://.com')
 Traceback (most recent call last):
 ...
@@ -1076,6 +1109,10 @@ False
 >>> f.clean(1)
 True
 >>> f.clean(0)
+False
+>>> f.clean('1')
+True
+>>> f.clean('0')
 False
 >>> f.clean('Django rocks')
 True
@@ -1201,7 +1238,10 @@ True
 >>> f.clean(False)
 False
 >>> f.clean(None)
+>>> f.clean('0')
+False
 >>> f.clean('1')
+True
 >>> f.clean('2')
 >>> f.clean('3')
 >>> f.clean('hello')
@@ -1219,6 +1259,21 @@ False
 True
 >>> f.cleaned_data['hidden_nullbool2']
 False
+
+# Make sure we're compatible with MySQL, which uses 0 and 1 for its boolean
+# values. (#9609)
+>>> NULLBOOL_CHOICES = (('1', 'Yes'), ('0', 'No'), ('', 'Unknown'))
+>>> class MySQLNullBooleanForm(Form):
+...     nullbool0 = NullBooleanField(widget=RadioSelect(choices=NULLBOOL_CHOICES))
+...     nullbool1 = NullBooleanField(widget=RadioSelect(choices=NULLBOOL_CHOICES))
+...     nullbool2 = NullBooleanField(widget=RadioSelect(choices=NULLBOOL_CHOICES))
+>>> f = MySQLNullBooleanForm({ 'nullbool0': '1', 'nullbool1': '0', 'nullbool2': '' })
+>>> f.full_clean()
+>>> f.cleaned_data['nullbool0']
+True
+>>> f.cleaned_data['nullbool1']
+False
+>>> f.cleaned_data['nullbool2']
 
 # MultipleChoiceField #########################################################
 

@@ -1,5 +1,6 @@
+import unittest
 from django import forms
-from django.contrib.formtools import preview, wizard
+from django.contrib.formtools import preview, wizard, utils
 from django import http
 from django.test import TestCase
 
@@ -101,6 +102,39 @@ class PreviewTests(TestCase):
         response = self.client.post('/test1/', self.test_data)
         self.assertEqual(response.content, success_string)
 
+class SecurityHashTests(unittest.TestCase):
+
+    def test_textfield_hash(self):
+        """
+        Regression test for #10034: the hash generation function should ignore
+        leading/trailing whitespace so as to be friendly to broken browsers that
+        submit it (usually in textareas).
+        """
+        f1 = HashTestForm({'name': 'joe', 'bio': 'Nothing notable.'})
+        f2 = HashTestForm({'name': '  joe', 'bio': 'Nothing notable.  '})
+        hash1 = utils.security_hash(None, f1)
+        hash2 = utils.security_hash(None, f2)
+        self.assertEqual(hash1, hash2)
+        
+    def test_empty_permitted(self):
+        """
+        Regression test for #10643: the security hash should allow forms with
+        empty_permitted = True, or forms where data has not changed.
+        """
+        f1 = HashTestBlankForm({})
+        f2 = HashTestForm({}, empty_permitted=True)
+        hash1 = utils.security_hash(None, f1)
+        hash2 = utils.security_hash(None, f2)
+        self.assertEqual(hash1, hash2)
+
+class HashTestForm(forms.Form):
+    name = forms.CharField()
+    bio = forms.CharField()
+
+class HashTestBlankForm(forms.Form):
+    name = forms.CharField(required=False)
+    bio = forms.CharField(required=False)
+
 #
 # FormWizard tests
 #
@@ -113,15 +147,18 @@ class WizardPageTwoForm(forms.Form):
 
 class WizardClass(wizard.FormWizard):
     def render_template(self, *args, **kw):
-        return ""
+        return http.HttpResponse("")
 
     def done(self, request, cleaned_data):
         return http.HttpResponse(success_string)
 
-class DummyRequest(object):
+class DummyRequest(http.HttpRequest):
     def __init__(self, POST=None):
+        super(DummyRequest, self).__init__()
         self.method = POST and "POST" or "GET"
-        self.POST = POST
+        if POST is not None:
+            self.POST.update(POST)
+        self._dont_enforce_csrf_checks = True
 
 class WizardTests(TestCase):
     def test_step_starts_at_zero(self):

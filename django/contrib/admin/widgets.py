@@ -7,6 +7,7 @@ import copy
 from django import forms
 from django.forms.widgets import RadioFieldRenderer
 from django.forms.util import flatatt
+from django.utils.html import escape
 from django.utils.text import truncate_words
 from django.utils.translation import ugettext as _
 from django.utils.safestring import mark_safe
@@ -125,7 +126,7 @@ class ForeignKeyRawIdWidget(forms.TextInput):
         if value:
             output.append(self.label_for_value(value))
         return mark_safe(u''.join(output))
-    
+
     def base_url_parameters(self):
         params = {}
         if self.rel.limit_choices_to:
@@ -137,18 +138,18 @@ class ForeignKeyRawIdWidget(forms.TextInput):
                     v = str(v)
                 items.append((k, v))
             params.update(dict(items))
-        return params    
-    
+        return params
+
     def url_parameters(self):
         from django.contrib.admin.views.main import TO_FIELD_VAR
         params = self.base_url_parameters()
         params.update({TO_FIELD_VAR: self.rel.get_related_field().name})
         return params
-            
+
     def label_for_value(self, value):
         key = self.rel.get_related_field().name
         obj = self.rel.to._default_manager.get(**{key: value})
-        return '&nbsp;<strong>%s</strong>' % truncate_words(obj, 14)
+        return '&nbsp;<strong>%s</strong>' % escape(truncate_words(obj, 14))
 
 class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
     """
@@ -165,10 +166,10 @@ class ManyToManyRawIdWidget(ForeignKeyRawIdWidget):
         else:
             value = ''
         return super(ManyToManyRawIdWidget, self).render(name, value, attrs)
-    
+
     def url_parameters(self):
         return self.base_url_parameters()
-    
+
     def label_for_value(self, value):
         return ''
 
@@ -222,10 +223,10 @@ class RelatedFieldWidgetWrapper(forms.Widget):
         rel_to = self.rel.to
         info = (rel_to._meta.app_label, rel_to._meta.object_name.lower())
         try:
-            related_info = (self.admin_site.name,) + info
-            related_url = reverse('%sadmin_%s_%s_add' % related_info)
+            related_url = reverse('admin:%s_%s_add' % info, current_app=self.admin_site.name)
         except NoReverseMatch:
-            related_url = '../../../%s/%s/add/' % info
+            info = (self.admin_site.root_path, rel_to._meta.app_label, rel_to._meta.object_name.lower())
+            related_url = '%s%s/%s/add/' % info
         self.widget.choices = self.choices
         output = [self.widget.render(name, value, *args, **kwargs)]
         if rel_to in self.admin_site._registry: # If the related object has an admin interface:

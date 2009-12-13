@@ -11,6 +11,7 @@ except NameError:
 from django.template import Node, NodeList, Template, Context, Variable
 from django.template import TemplateSyntaxError, VariableDoesNotExist, BLOCK_TAG_START, BLOCK_TAG_END, VARIABLE_TAG_START, VARIABLE_TAG_END, SINGLE_BRACE_START, SINGLE_BRACE_END, COMMENT_TAG_START, COMMENT_TAG_END
 from django.template import get_library, Library, InvalidTemplateLibrary
+from django.template.smartif import IfParser, Literal
 from django.conf import settings
 from django.utils.encoding import smart_str, smart_unicode
 from django.utils.itercompat import groupby
@@ -36,6 +37,23 @@ class AutoEscapeControlNode(Node):
 class CommentNode(Node):
     def render(self, context):
         return ''
+
+class CsrfTokenNode(Node):
+    def render(self, context):
+        csrf_token = context.get('csrf_token', None)
+        if csrf_token:
+            if csrf_token == 'NOTPROVIDED':
+                return mark_safe(u"")
+            else:
+                return mark_safe(u"<div style='display:none'><input type='hidden' name='csrfmiddlewaretoken' value='%s' /></div>" % (csrf_token))
+        else:
+            # It's very probable that the token is missing because of
+            # misconfiguration, so we raise a warning
+            from django.conf import settings
+            if settings.DEBUG:
+                import warnings
+                warnings.warn("A {% csrf_token %} was used in a template, but the context did not provide the value.  This is usually caused by not using RequestContext.")
+            return u''
 
 class CycleNode(Node):
     def __init__(self, cyclevars, variable_name=None):
@@ -210,10 +228,9 @@ class IfEqualNode(Node):
         return self.nodelist_false.render(context)
 
 class IfNode(Node):
-    def __init__(self, bool_exprs, nodelist_true, nodelist_false, link_type):
-        self.bool_exprs = bool_exprs
+    def __init__(self, var, nodelist_true, nodelist_false=None):
         self.nodelist_true, self.nodelist_false = nodelist_true, nodelist_false
-        self.link_type = link_type
+        self.var = var
 
     def __repr__(self):
         return "<If node>"
@@ -233,28 +250,10 @@ class IfNode(Node):
         return nodes
 
     def render(self, context):
-        if self.link_type == IfNode.LinkTypes.or_:
-            for ifnot, bool_expr in self.bool_exprs:
-                try:
-                    value = bool_expr.resolve(context, True)
-                except VariableDoesNotExist:
-                    value = None
-                if (value and not ifnot) or (ifnot and not value):
-                    return self.nodelist_true.render(context)
-            return self.nodelist_false.render(context)
-        else:
-            for ifnot, bool_expr in self.bool_exprs:
-                try:
-                    value = bool_expr.resolve(context, True)
-                except VariableDoesNotExist:
-                    value = None
-                if not ((value and not ifnot) or (ifnot and not value)):
-                    return self.nodelist_false.render(context)
+        if self.var.eval(context):
             return self.nodelist_true.render(context)
-
-    class LinkTypes:
-        and_ = 0,
-        or_ = 1
+        else:
+            return self.nodelist_false.render(context)
 
 class RegroupNode(Node):
     def __init__(self, target, expression, var_name):
@@ -367,17 +366,17 @@ class URLNode(Node):
         # {% url ... as var %} construct in which cause return nothing.
         url = ''
         try:
-            url = reverse(self.view_name, args=args, kwargs=kwargs)
+            url = reverse(self.view_name, args=args, kwargs=kwargs, current_app=context.current_app)
         except NoReverseMatch, e:
             if settings.SETTINGS_MODULE:
                 project_name = settings.SETTINGS_MODULE.split('.')[0]
                 try:
                     url = reverse(project_name + '.' + self.view_name,
-                              args=args, kwargs=kwargs)
+                              args=args, kwargs=kwargs, current_app=context.current_app)
                 except NoReverseMatch:
                     if self.asvar is None:
                         # Re-raise the original exception, not the one with
-                        # the path relative to the project. This makes a 
+                        # the path relative to the project. This makes a
                         # better error message.
                         raise e
             else:
@@ -523,6 +522,10 @@ def cycle(parser, token):
     return node
 cycle = register.tag(cycle)
 
+def csrf_token(parser, token):
+    return CsrfTokenNode()
+register.tag(csrf_token)
+
 def debug(parser, token):
     """
     Outputs a whole load of debugging information, including the current
@@ -564,7 +567,7 @@ do_filter = register.tag("filter", do_filter)
 #@register.tag
 def firstof(parser, token):
     """
-    Outputs the first variable passed that is not False.
+    Outputs the first variable passed that is not False, without escaping.
 
     Outputs nothing if all the passed variables are False.
 
@@ -575,11 +578,11 @@ def firstof(parser, token):
     This is equivalent to::
 
         {% if var1 %}
-            {{ var1 }}
+            {{ var1|safe }}
         {% else %}{% if var2 %}
-            {{ var2 }}
+            {{ var2|safe }}
         {% else %}{% if var3 %}
-            {{ var3 }}
+            {{ var3|safe }}
         {% endif %}{% endif %}{% endif %}
 
     but obviously much cleaner!
@@ -588,6 +591,12 @@ def firstof(parser, token):
     passed variables are False::
 
         {% firstof var1 var2 var3 "fallback value" %}
+
+    If you want to escape the output, use a filter tag::
+
+        {% filter force_escape %}
+            {% firstof var1 var2 var3 "fallback value" %}
+	{% endfilter %}
 
     """
     bits = token.split_contents()[1:]
@@ -734,6 +743,27 @@ def ifnotequal(parser, token):
     return do_ifequal(parser, token, True)
 ifnotequal = register.tag(ifnotequal)
 
+class TemplateLiteral(Literal):
+    def __init__(self, value, text):
+        self.value = value
+        self.text = text # for better error messages
+
+    def display(self):
+        return self.text
+
+    def eval(self, context):
+        return self.value.resolve(context, ignore_failures=True)
+
+class TemplateIfParser(IfParser):
+    error_class = TemplateSyntaxError
+
+    def __init__(self, parser, *args, **kwargs):
+        self.template_parser = parser
+        return super(TemplateIfParser, self).__init__(*args, **kwargs)
+
+    def create_var(self, value):
+        return TemplateLiteral(self.template_parser.compile_filter(value), value)
+
 #@register.tag(name="if")
 def do_if(parser, token):
     """
@@ -778,47 +808,21 @@ def do_if(parser, token):
             There are some athletes and absolutely no coaches.
         {% endif %}
 
-    ``if`` tags do not allow ``and`` and ``or`` clauses with the same tag,
-    because the order of logic would be ambigous. For example, this is
-    invalid::
+    Comparison operators are also available, and the use of filters is also
+    allowed, for example:
 
-        {% if athlete_list and coach_list or cheerleader_list %}
+        {% if articles|length >= 5 %}...{% endif %}
 
-    If you need to combine ``and`` and ``or`` to do advanced logic, just use
-    nested if tags. For example::
+    Arguments and operators _must_ have a space between them, so
+    ``{% if 1>2 %}`` is not a valid if tag.
 
-        {% if athlete_list %}
-            {% if coach_list or cheerleader_list %}
-                We have athletes, and either coaches or cheerleaders!
-            {% endif %}
-        {% endif %}
+    All supported operators are: ``or``, ``and``, ``in``, ``==`` (or ``=``),
+    ``!=``, ``>``, ``>=``, ``<`` and ``<=``.
+
+    Operator precedence follows Python.
     """
-    bits = token.contents.split()
-    del bits[0]
-    if not bits:
-        raise TemplateSyntaxError("'if' statement requires at least one argument")
-    # Bits now looks something like this: ['a', 'or', 'not', 'b', 'or', 'c.d']
-    bitstr = ' '.join(bits)
-    boolpairs = bitstr.split(' and ')
-    boolvars = []
-    if len(boolpairs) == 1:
-        link_type = IfNode.LinkTypes.or_
-        boolpairs = bitstr.split(' or ')
-    else:
-        link_type = IfNode.LinkTypes.and_
-        if ' or ' in bitstr:
-            raise TemplateSyntaxError, "'if' tags can't mix 'and' and 'or'"
-    for boolpair in boolpairs:
-        if ' ' in boolpair:
-            try:
-                not_, boolvar = boolpair.split()
-            except ValueError:
-                raise TemplateSyntaxError, "'if' statement improperly formatted"
-            if not_ != 'not':
-                raise TemplateSyntaxError, "Expected 'not' in if statement"
-            boolvars.append((True, parser.compile_filter(boolvar)))
-        else:
-            boolvars.append((False, parser.compile_filter(boolpair)))
+    bits = token.split_contents()[1:]
+    var = TemplateIfParser(parser, bits).parse()
     nodelist_true = parser.parse(('else', 'endif'))
     token = parser.next_token()
     if token.contents == 'else':
@@ -826,7 +830,7 @@ def do_if(parser, token):
         parser.delete_first_token()
     else:
         nodelist_false = NodeList()
-    return IfNode(boolvars, nodelist_true, nodelist_false, link_type)
+    return IfNode(var, nodelist_true, nodelist_false)
 do_if = register.tag("if", do_if)
 
 #@register.tag
@@ -980,7 +984,7 @@ def regroup(parser, token):
     that ``grouper``.  In this case, ``grouper`` would be ``Male``, ``Female``
     and ``Unknown``, and ``list`` is the list of people with those genders.
 
-    Note that `{% regroup %}`` does not work when the list to be grouped is not
+    Note that ``{% regroup %}`` does not work when the list to be grouped is not
     sorted by the key you are grouping by!  This means that if your list of
     people was not sorted by gender, you'd need to make sure it is sorted
     before using it, i.e.::
@@ -1136,7 +1140,7 @@ def widthratio(parser, token):
 
         <img src='bar.gif' height='10' width='{% widthratio this_value max_value 100 %}' />
 
-    Above, if ``this_value`` is 175 and ``max_value`` is 200, the the image in
+    Above, if ``this_value`` is 175 and ``max_value`` is 200, the image in
     the above example will be 88 pixels wide (because 175/200 = .875;
     .875 * 100 = 87.5 which is rounded up to 88).
     """

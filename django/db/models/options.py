@@ -21,7 +21,7 @@ get_verbose_name = lambda class_name: re.sub('(((?<=[a-z])[A-Z])|([A-Z](?![A-Z]|
 DEFAULT_NAMES = ('verbose_name', 'db_table', 'ordering',
                  'unique_together', 'permissions', 'get_latest_by',
                  'order_with_respect_to', 'app_label', 'db_tablespace',
-                 'abstract', 'managed', 'proxy')
+                 'abstract', 'managed', 'proxy', 'auto_created')
 
 class Options(object):
     def __init__(self, meta, app_label=None):
@@ -47,6 +47,7 @@ class Options(object):
         self.proxy_for_model = None
         self.parents = SortedDict()
         self.duplicate_targets = {}
+        self.auto_created = False
 
         # To handle various inheritance situations, we need to track where
         # managers came from (concrete or abstract base classes).
@@ -461,8 +462,13 @@ class Options(object):
         if ancestor in self.parents:
             return self.parents[ancestor]
         for parent in self.parents:
-            if parent._meta.get_ancestor_link(ancestor):
-                return self.parents[parent]
+            # Tries to get a link field from the immediate parent
+            parent_link = parent._meta.get_ancestor_link(ancestor)
+            if parent_link:
+                # In case of a proxied model, the first link
+                # of the chain to the ancestor is that parent
+                # links
+                return self.parents[parent] or parent_link
 
     def get_ordered_objects(self):
         "Returns a list of Options objects that are ordered with respect to this object."
@@ -482,4 +488,3 @@ class Options(object):
         Returns the index of the primary key field in the self.fields list.
         """
         return self.fields.index(self.pk)
-

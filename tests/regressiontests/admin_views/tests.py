@@ -2,18 +2,23 @@
 
 import re
 import datetime
-
+from django.core.files import temp as tempfile
 from django.test import TestCase
 from django.contrib.auth.models import User, Permission
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.admin.models import LogEntry
+from django.contrib.admin.models import LogEntry, DELETION
 from django.contrib.admin.sites import LOGIN_FORM_KEY
 from django.contrib.admin.util import quote
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.utils.cache import get_max_age
 from django.utils.html import escape
 
 # local test models
-from models import Article, CustomArticle, Section, ModelWithStringPrimaryKey, Person, Persona, FooAccount, BarAccount, Subscriber, ExternalSubscriber, Podcast, EmptyModel
+from models import Article, BarAccount, CustomArticle, EmptyModel, \
+    ExternalSubscriber, FooAccount, Gallery, ModelWithStringPrimaryKey, \
+    Person, Persona, Picture, Podcast, Section, Subscriber, Vodcast, \
+    Language, Collector, Widget, Grommet, DooHickey, FancyDoodad, Whatsit, \
+    Category
 
 try:
     set
@@ -200,6 +205,11 @@ class AdminViewBasicTest(TestCase):
         response = self.client.get('/test_admin/%s/admin_views/thing/' % self.urlbit, {'color__id__exact': 'StringNotInteger!'})
         self.assertRedirects(response, '/test_admin/%s/admin_views/thing/?e=1' % self.urlbit)
 
+    def testLogoutAndPasswordChangeURLs(self):
+        response = self.client.get('/test_admin/%s/admin_views/article/' % self.urlbit)
+        self.failIf('<a href="/test_admin/%s/logout/">' % self.urlbit not in response.content)
+        self.failIf('<a href="/test_admin/%s/password_change/">' % self.urlbit not in response.content)
+
     def testNamedGroupFieldChoicesChangeList(self):
         """
         Ensures the admin changelist shows correct values in the relevant column
@@ -230,6 +240,34 @@ class AdminViewBasicTest(TestCase):
             '<a href="?surface__exact=y">Vertical</a>' in response.content,
             "Changelist filter isn't showing options contained inside a model field 'choices' option named group."
         )
+
+class SaveAsTests(TestCase):
+    fixtures = ['admin-views-users.xml','admin-views-person.xml']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_save_as_duplication(self):
+        """Ensure save as actually creates a new person"""
+        post_data = {'_saveasnew':'', 'name':'John M', 'gender':1}
+        response = self.client.post('/test_admin/admin/admin_views/person/1/', post_data)
+        self.assertEqual(len(Person.objects.filter(name='John M')), 1)
+        self.assertEqual(len(Person.objects.filter(id=1)), 1)
+
+    def test_save_as_display(self):
+        """
+        Ensure that 'save as' is displayed when activated and after submitting
+        invalid data aside save_as_new will not show us a form to overwrite the
+        initial model.
+        """
+        response = self.client.get('/test_admin/admin/admin_views/person/1/')
+        self.assert_(response.context['save_as'])
+        post_data = {'_saveasnew':'', 'name':'John M', 'gender':3, 'alive':'checked'}
+        response = self.client.post('/test_admin/admin/admin_views/person/1/', post_data)
+        self.assertEqual(response.context['form_url'], '../add/')
 
 class CustomModelAdminTest(AdminViewBasicTest):
     urlbit = "admin2"
@@ -315,6 +353,9 @@ class AdminViewPermissionsTest(TestCase):
                      LOGIN_FORM_KEY: 1,
                      'username': 'joepublic',
                      'password': 'secret'}
+        self.no_username_login = {
+                     LOGIN_FORM_KEY: 1,
+                     'password': 'secret'}
 
     def testLogin(self):
         """
@@ -374,6 +415,14 @@ class AdminViewPermissionsTest(TestCase):
         request = self.client.get('/test_admin/admin/')
         self.failUnlessEqual(request.status_code, 200)
         login = self.client.post('/test_admin/admin/', self.joepublic_login)
+        self.failUnlessEqual(login.status_code, 200)
+        # Login.context is a list of context dicts we just need to check the first one.
+        self.assert_(login.context[0].get('error_message'))
+
+        # Requests without username should not return 500 errors.
+        request = self.client.get('/test_admin/admin/')
+        self.failUnlessEqual(request.status_code, 200)
+        login = self.client.post('/test_admin/admin/', self.no_username_login)
         self.failUnlessEqual(login.status_code, 200)
         # Login.context is a list of context dicts we just need to check the first one.
         self.assert_(login.context[0].get('error_message'))
@@ -541,6 +590,9 @@ class AdminViewPermissionsTest(TestCase):
         post = self.client.post('/test_admin/admin/admin_views/article/1/delete/', delete_dict)
         self.assertRedirects(post, '/test_admin/admin/')
         self.failUnlessEqual(Article.objects.all().count(), 2)
+        article_ct = ContentType.objects.get_for_model(Article)
+        logged = LogEntry.objects.get(content_type=article_ct, action_flag=DELETION)
+        self.failUnlessEqual(logged.object_id, u'1')
         self.client.get('/test_admin/admin/logout/')
 
 class AdminViewStringPrimaryKeyTest(TestCase):
@@ -558,6 +610,12 @@ class AdminViewStringPrimaryKeyTest(TestCase):
     def tearDown(self):
         self.client.logout()
 
+    def test_get_history_view(self):
+        "Retrieving the history for the object using urlencoded form of primary key should work"
+        response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/%s/history/' % quote(self.pk))
+        self.assertContains(response, escape(self.pk))
+        self.failUnlessEqual(response.status_code, 200)
+ 
     def test_get_change_view(self):
         "Retrieving the object using urlencoded form of primary key should work"
         response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/%s/' % quote(self.pk))
@@ -575,6 +633,26 @@ class AdminViewStringPrimaryKeyTest(TestCase):
         response = self.client.get('/test_admin/admin/')
         should_contain = """<a href="admin_views/modelwithstringprimarykey/%s/">%s</a>""" % (quote(self.pk), escape(self.pk))
         self.assertContains(response, should_contain)
+
+    def test_recentactions_without_content_type(self):
+        "If a LogEntry is missing content_type it will not display it in span tag under the hyperlink."
+        response = self.client.get('/test_admin/admin/')
+        should_contain = """<a href="admin_views/modelwithstringprimarykey/%s/">%s</a>""" % (quote(self.pk), escape(self.pk))
+        self.assertContains(response, should_contain)
+        should_contain = "Model with string primary key" # capitalized in Recent Actions
+        self.assertContains(response, should_contain)
+        logentry = LogEntry.objects.get(content_type__name__iexact=should_contain)
+        # http://code.djangoproject.com/ticket/10275
+        # if the log entry doesn't have a content type it should still be
+        # possible to view the Recent Actions part
+        logentry.content_type = None
+        logentry.save()
+
+        counted_presence_before = response.content.count(should_contain)
+        response = self.client.get('/test_admin/admin/')
+        counted_presence_after = response.content.count(should_contain)
+        self.assertEquals(counted_presence_before - 1,
+                          counted_presence_after)
 
     def test_deleteconfirmation_link(self):
         "The link from the delete confirmation page referring back to the changeform of the object should be quoted"
@@ -796,6 +874,16 @@ class AdminViewListEditable(TestCase):
         response = self.client.get('/test_admin/admin/admin_views/podcast/')
         self.failUnlessEqual(response.status_code, 200)
 
+    def test_inheritance_2(self):
+        Vodcast.objects.create(name="This Week in Django", released=True)
+        response = self.client.get('/test_admin/admin/admin_views/vodcast/')
+        self.failUnlessEqual(response.status_code, 200)
+
+    def test_custom_pk(self):
+        Language.objects.create(iso='en', name='English', english_name='English')
+        response = self.client.get('/test_admin/admin/admin_views/language/')
+        self.failUnlessEqual(response.status_code, 200)
+
     def test_changelist_input_html(self):
         response = self.client.get('/test_admin/admin/admin_views/person/')
         # 2 inputs per object(the field and the hidden id field) = 6
@@ -803,8 +891,9 @@ class AdminViewListEditable(TestCase):
         # 4 action inputs (3 regular checkboxes, 1 checkbox to select all)
         # main form submit button = 1
         # search field and search submit button = 2
-        # 6 + 2 + 1 + 2 = 11 inputs
-        self.failUnlessEqual(response.content.count("<input"), 15)
+        # CSRF field = 1
+        # 6 + 2 + 4 + 1 + 2 + 1 = 16 inputs
+        self.failUnlessEqual(response.content.count("<input"), 16)
         # 1 select per object = 3 selects
         self.failUnlessEqual(response.content.count("<select"), 4)
 
@@ -826,7 +915,7 @@ class AdminViewListEditable(TestCase):
         self.client.post('/test_admin/admin/admin_views/person/', data)
 
         self.failUnlessEqual(Person.objects.get(name="John Mauchly").alive, False)
-        self.failUnlessEqual(Person.objects.get(name="Grace Hooper").gender, 2)
+        self.failUnlessEqual(Person.objects.get(name="Grace Hopper").gender, 2)
 
         # test a filtered page
         data = {
@@ -856,6 +945,60 @@ class AdminViewListEditable(TestCase):
         self.client.post('/test_admin/admin/admin_views/person/?q=mauchly', data)
 
         self.failUnlessEqual(Person.objects.get(name="John Mauchly").alive, False)
+
+    def test_list_editable_ordering(self):
+        collector = Collector.objects.create(id=1, name="Frederick Clegg")
+
+        Category.objects.create(id=1, order=1, collector=collector)
+        Category.objects.create(id=2, order=2, collector=collector)
+        Category.objects.create(id=3, order=0, collector=collector)
+        Category.objects.create(id=4, order=0, collector=collector)
+
+        # NB: The order values must be changed so that the items are reordered.
+        data = {
+            "form-TOTAL_FORMS": "4",
+            "form-INITIAL_FORMS": "4",
+
+            "form-0-order": "14",
+            "form-0-id": "1",
+            "form-0-collector": "1",
+
+            "form-1-order": "13",
+            "form-1-id": "2",
+            "form-1-collector": "1",
+
+            "form-2-order": "1",
+            "form-2-id": "3",
+            "form-2-collector": "1",
+
+            "form-3-order": "0",
+            "form-3-id": "4",
+            "form-3-collector": "1",
+        }
+        response = self.client.post('/test_admin/admin/admin_views/category/', data)
+        # Successful post will redirect
+        self.failUnlessEqual(response.status_code, 302)
+
+        # Check that the order values have been applied to the right objects
+        self.failUnlessEqual(Category.objects.get(id=1).order, 14)
+        self.failUnlessEqual(Category.objects.get(id=2).order, 13)
+        self.failUnlessEqual(Category.objects.get(id=3).order, 1)
+        self.failUnlessEqual(Category.objects.get(id=4).order, 0)
+
+class AdminSearchTest(TestCase):
+    fixtures = ['admin-views-users','multiple-child-classes']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_search_on_sibling_models(self):
+        "Check that a search that mentions sibling models"
+        response = self.client.get('/test_admin/admin/admin_views/recommendation/?q=bar')
+        # confirm the search returned 1 object
+        self.assertContains(response, "\n1 recommendation\n")
 
 class AdminInheritedInlinesTest(TestCase):
     fixtures = ['admin-views-users.xml',]
@@ -995,7 +1138,7 @@ class AdminActionsTest(TestCase):
         }
         response = self.client.post('/test_admin/admin/admin_views/externalsubscriber/', action_data)
         self.failUnlessEqual(response.status_code, 302)
-        
+
     def test_model_without_action(self):
         "Tests a ModelAdmin without any action"
         response = self.client.get('/test_admin/admin/admin_views/oldsubscriber/')
@@ -1004,7 +1147,16 @@ class AdminActionsTest(TestCase):
             '<input type="checkbox" class="action-select"' not in response.content,
             "Found an unexpected action toggle checkboxbox in response"
         )
-        
+        self.assert_('action-checkbox-column' not in response.content,
+            "Found unexpected action-checkbox-column class in response")
+
+    def test_action_column_class(self):
+        "Tests that the checkbox column class is present in the response"
+        response = self.client.get('/test_admin/admin/admin_views/subscriber/')
+        self.assertNotEquals(response.context["action_form"], None)
+        self.assert_('action-checkbox-column' in response.content,
+            "Expected an action-checkbox-column in response")
+
     def test_multiple_actions_form(self):
         """
         Test that actions come from the form whose submit button was pressed (#10618).
@@ -1022,6 +1174,35 @@ class AdminActionsTest(TestCase):
         self.assertEquals(len(mail.outbox), 1)
         self.assertEquals(mail.outbox[0].subject, 'Greetings from a function action')
 
+    def test_user_message_on_none_selected(self):
+        """
+        User should see a warning when 'Go' is pressed and no items are selected.
+        """
+        action_data = {
+            ACTION_CHECKBOX_NAME: [],
+            'action' : 'delete_selected',
+            'index': 0,
+        }
+        response = self.client.post('/test_admin/admin/admin_views/subscriber/', action_data)
+        msg = """Items must be selected in order to perform actions on them. No items have been changed."""
+        self.assertContains(response, msg)
+        self.failUnlessEqual(Subscriber.objects.count(), 2)
+
+    def test_user_message_on_no_action(self):
+        """
+        User should see a warning when 'Go' is pressed and no action is selected.
+        """
+        action_data = {
+            ACTION_CHECKBOX_NAME: [1, 2],
+            'action' : '',
+            'index': 0,
+        }
+        response = self.client.post('/test_admin/admin/admin_views/subscriber/', action_data)
+        msg = """No action selected."""
+        self.assertContains(response, msg)
+        self.failUnlessEqual(Subscriber.objects.count(), 2)
+
+
 class TestInlineNotEditable(TestCase):
     fixtures = ['admin-views-users.xml']
 
@@ -1038,7 +1219,6 @@ class TestInlineNotEditable(TestCase):
         """
         response = self.client.get('/test_admin/admin/admin_views/parent/add/')
         self.failUnlessEqual(response.status_code, 200)
-
 
 class AdminCustomQuerysetTest(TestCase):
     fixtures = ['admin-views-users.xml']
@@ -1062,3 +1242,422 @@ class AdminCustomQuerysetTest(TestCase):
                 self.assertEqual(response.status_code, 200)
             else:
                 self.assertEqual(response.status_code, 404)
+
+class AdminInlineFileUploadTest(TestCase):
+    fixtures = ['admin-views-users.xml', 'admin-views-actions.xml']
+    urlbit = 'admin'
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+        # Set up test Picture and Gallery.
+        # These must be set up here instead of in fixtures in order to allow Picture
+        # to use a NamedTemporaryFile.
+        tdir = tempfile.gettempdir()
+        file1 = tempfile.NamedTemporaryFile(suffix=".file1", dir=tdir)
+        file1.write('a' * (2 ** 21))
+        filename = file1.name
+        file1.close()
+        g = Gallery(name="Test Gallery")
+        g.save()
+        p = Picture(name="Test Picture", image=filename, gallery=g)
+        p.save()
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_inline_file_upload_edit_validation_error_post(self):
+        """
+        Test that inline file uploads correctly display prior data (#10002).
+        """
+        post_data = {
+            "name": u"Test Gallery",
+            "pictures-TOTAL_FORMS": u"2",
+            "pictures-INITIAL_FORMS": u"1",
+            "pictures-0-id": u"1",
+            "pictures-0-gallery": u"1",
+            "pictures-0-name": "Test Picture",
+            "pictures-0-image": "",
+            "pictures-1-id": "",
+            "pictures-1-gallery": "1",
+            "pictures-1-name": "Test Picture 2",
+            "pictures-1-image": "",
+        }
+        response = self.client.post('/test_admin/%s/admin_views/gallery/1/' % self.urlbit, post_data)
+        self.failUnless(response._container[0].find("Currently:") > -1)
+
+
+class AdminInlineTests(TestCase):
+    fixtures = ['admin-views-users.xml']
+
+    def setUp(self):
+        self.post_data = {
+            "name": u"Test Name",
+
+            "widget_set-TOTAL_FORMS": "3",
+            "widget_set-INITIAL_FORMS": u"0",
+            "widget_set-0-id": "",
+            "widget_set-0-owner": "1",
+            "widget_set-0-name": "",
+            "widget_set-1-id": "",
+            "widget_set-1-owner": "1",
+            "widget_set-1-name": "",
+            "widget_set-2-id": "",
+            "widget_set-2-owner": "1",
+            "widget_set-2-name": "",
+
+            "doohickey_set-TOTAL_FORMS": "3",
+            "doohickey_set-INITIAL_FORMS": u"0",
+            "doohickey_set-0-owner": "1",
+            "doohickey_set-0-code": "",
+            "doohickey_set-0-name": "",
+            "doohickey_set-1-owner": "1",
+            "doohickey_set-1-code": "",
+            "doohickey_set-1-name": "",
+            "doohickey_set-2-owner": "1",
+            "doohickey_set-2-code": "",
+            "doohickey_set-2-name": "",
+
+            "grommet_set-TOTAL_FORMS": "3",
+            "grommet_set-INITIAL_FORMS": u"0",
+            "grommet_set-0-code": "",
+            "grommet_set-0-owner": "1",
+            "grommet_set-0-name": "",
+            "grommet_set-1-code": "",
+            "grommet_set-1-owner": "1",
+            "grommet_set-1-name": "",
+            "grommet_set-2-code": "",
+            "grommet_set-2-owner": "1",
+            "grommet_set-2-name": "",
+
+            "whatsit_set-TOTAL_FORMS": "3",
+            "whatsit_set-INITIAL_FORMS": u"0",
+            "whatsit_set-0-owner": "1",
+            "whatsit_set-0-index": "",
+            "whatsit_set-0-name": "",
+            "whatsit_set-1-owner": "1",
+            "whatsit_set-1-index": "",
+            "whatsit_set-1-name": "",
+            "whatsit_set-2-owner": "1",
+            "whatsit_set-2-index": "",
+            "whatsit_set-2-name": "",
+
+            "fancydoodad_set-TOTAL_FORMS": "3",
+            "fancydoodad_set-INITIAL_FORMS": u"0",
+            "fancydoodad_set-0-doodad_ptr": "",
+            "fancydoodad_set-0-owner": "1",
+            "fancydoodad_set-0-name": "",
+            "fancydoodad_set-0-expensive": "on",
+            "fancydoodad_set-1-doodad_ptr": "",
+            "fancydoodad_set-1-owner": "1",
+            "fancydoodad_set-1-name": "",
+            "fancydoodad_set-1-expensive": "on",
+            "fancydoodad_set-2-doodad_ptr": "",
+            "fancydoodad_set-2-owner": "1",
+            "fancydoodad_set-2-name": "",
+            "fancydoodad_set-2-expensive": "on",
+
+            "category_set-TOTAL_FORMS": "3",
+            "category_set-INITIAL_FORMS": "0",
+            "category_set-0-order": "",
+            "category_set-0-id": "",
+            "category_set-0-collector": "1",
+            "category_set-1-order": "",
+            "category_set-1-id": "",
+            "category_set-1-collector": "1",
+            "category_set-2-order": "",
+            "category_set-2-id": "",
+            "category_set-2-collector": "1",
+        }
+
+        result = self.client.login(username='super', password='secret')
+        self.failUnlessEqual(result, True)
+        self.collector = Collector(pk=1,name='John Fowles')
+        self.collector.save()
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_simple_inline(self):
+        "A simple model can be saved as inlines"
+        # First add a new inline
+        self.post_data['widget_set-0-name'] = "Widget 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Widget.objects.count(), 1)
+        self.failUnlessEqual(Widget.objects.all()[0].name, "Widget 1")
+
+        # Check that the PK link exists on the rendered form
+        response = self.client.get('/test_admin/admin/admin_views/collector/1/')
+        self.assertContains(response, 'name="widget_set-0-id"')
+
+        # Now resave that inline
+        self.post_data['widget_set-INITIAL_FORMS'] = "1"
+        self.post_data['widget_set-0-id'] = "1"
+        self.post_data['widget_set-0-name'] = "Widget 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Widget.objects.count(), 1)
+        self.failUnlessEqual(Widget.objects.all()[0].name, "Widget 1")
+
+        # Now modify that inline
+        self.post_data['widget_set-INITIAL_FORMS'] = "1"
+        self.post_data['widget_set-0-id'] = "1"
+        self.post_data['widget_set-0-name'] = "Widget 1 Updated"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Widget.objects.count(), 1)
+        self.failUnlessEqual(Widget.objects.all()[0].name, "Widget 1 Updated")
+
+    def test_explicit_autofield_inline(self):
+        "A model with an explicit autofield primary key can be saved as inlines. Regression for #8093"
+        # First add a new inline
+        self.post_data['grommet_set-0-name'] = "Grommet 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Grommet.objects.count(), 1)
+        self.failUnlessEqual(Grommet.objects.all()[0].name, "Grommet 1")
+
+        # Check that the PK link exists on the rendered form
+        response = self.client.get('/test_admin/admin/admin_views/collector/1/')
+        self.assertContains(response, 'name="grommet_set-0-code"')
+
+        # Now resave that inline
+        self.post_data['grommet_set-INITIAL_FORMS'] = "1"
+        self.post_data['grommet_set-0-code'] = "1"
+        self.post_data['grommet_set-0-name'] = "Grommet 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Grommet.objects.count(), 1)
+        self.failUnlessEqual(Grommet.objects.all()[0].name, "Grommet 1")
+
+        # Now modify that inline
+        self.post_data['grommet_set-INITIAL_FORMS'] = "1"
+        self.post_data['grommet_set-0-code'] = "1"
+        self.post_data['grommet_set-0-name'] = "Grommet 1 Updated"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Grommet.objects.count(), 1)
+        self.failUnlessEqual(Grommet.objects.all()[0].name, "Grommet 1 Updated")
+
+    def test_char_pk_inline(self):
+        "A model with a character PK can be saved as inlines. Regression for #10992"
+        # First add a new inline
+        self.post_data['doohickey_set-0-code'] = "DH1"
+        self.post_data['doohickey_set-0-name'] = "Doohickey 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(DooHickey.objects.count(), 1)
+        self.failUnlessEqual(DooHickey.objects.all()[0].name, "Doohickey 1")
+
+        # Check that the PK link exists on the rendered form
+        response = self.client.get('/test_admin/admin/admin_views/collector/1/')
+        self.assertContains(response, 'name="doohickey_set-0-code"')
+
+        # Now resave that inline
+        self.post_data['doohickey_set-INITIAL_FORMS'] = "1"
+        self.post_data['doohickey_set-0-code'] = "DH1"
+        self.post_data['doohickey_set-0-name'] = "Doohickey 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(DooHickey.objects.count(), 1)
+        self.failUnlessEqual(DooHickey.objects.all()[0].name, "Doohickey 1")
+
+        # Now modify that inline
+        self.post_data['doohickey_set-INITIAL_FORMS'] = "1"
+        self.post_data['doohickey_set-0-code'] = "DH1"
+        self.post_data['doohickey_set-0-name'] = "Doohickey 1 Updated"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(DooHickey.objects.count(), 1)
+        self.failUnlessEqual(DooHickey.objects.all()[0].name, "Doohickey 1 Updated")
+
+    def test_integer_pk_inline(self):
+        "A model with an integer PK can be saved as inlines. Regression for #10992"
+        # First add a new inline
+        self.post_data['whatsit_set-0-index'] = "42"
+        self.post_data['whatsit_set-0-name'] = "Whatsit 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Whatsit.objects.count(), 1)
+        self.failUnlessEqual(Whatsit.objects.all()[0].name, "Whatsit 1")
+
+        # Check that the PK link exists on the rendered form
+        response = self.client.get('/test_admin/admin/admin_views/collector/1/')
+        self.assertContains(response, 'name="whatsit_set-0-index"')
+
+        # Now resave that inline
+        self.post_data['whatsit_set-INITIAL_FORMS'] = "1"
+        self.post_data['whatsit_set-0-index'] = "42"
+        self.post_data['whatsit_set-0-name'] = "Whatsit 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Whatsit.objects.count(), 1)
+        self.failUnlessEqual(Whatsit.objects.all()[0].name, "Whatsit 1")
+
+        # Now modify that inline
+        self.post_data['whatsit_set-INITIAL_FORMS'] = "1"
+        self.post_data['whatsit_set-0-index'] = "42"
+        self.post_data['whatsit_set-0-name'] = "Whatsit 1 Updated"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(Whatsit.objects.count(), 1)
+        self.failUnlessEqual(Whatsit.objects.all()[0].name, "Whatsit 1 Updated")
+
+    def test_inherited_inline(self):
+        "An inherited model can be saved as inlines. Regression for #11042"
+        # First add a new inline
+        self.post_data['fancydoodad_set-0-name'] = "Fancy Doodad 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(FancyDoodad.objects.count(), 1)
+        self.failUnlessEqual(FancyDoodad.objects.all()[0].name, "Fancy Doodad 1")
+
+        # Check that the PK link exists on the rendered form
+        response = self.client.get('/test_admin/admin/admin_views/collector/1/')
+        self.assertContains(response, 'name="fancydoodad_set-0-doodad_ptr"')
+
+        # Now resave that inline
+        self.post_data['fancydoodad_set-INITIAL_FORMS'] = "1"
+        self.post_data['fancydoodad_set-0-doodad_ptr'] = "1"
+        self.post_data['fancydoodad_set-0-name'] = "Fancy Doodad 1"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(FancyDoodad.objects.count(), 1)
+        self.failUnlessEqual(FancyDoodad.objects.all()[0].name, "Fancy Doodad 1")
+
+        # Now modify that inline
+        self.post_data['fancydoodad_set-INITIAL_FORMS'] = "1"
+        self.post_data['fancydoodad_set-0-doodad_ptr'] = "1"
+        self.post_data['fancydoodad_set-0-name'] = "Fancy Doodad 1 Updated"
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        self.failUnlessEqual(response.status_code, 302)
+        self.failUnlessEqual(FancyDoodad.objects.count(), 1)
+        self.failUnlessEqual(FancyDoodad.objects.all()[0].name, "Fancy Doodad 1 Updated")
+
+    def test_ordered_inline(self):
+        """Check that an inline with an editable ordering fields is
+        updated correctly. Regression for #10922"""
+        # Create some objects with an initial ordering
+        Category.objects.create(id=1, order=1, collector=self.collector)
+        Category.objects.create(id=2, order=2, collector=self.collector)
+        Category.objects.create(id=3, order=0, collector=self.collector)
+        Category.objects.create(id=4, order=0, collector=self.collector)
+
+        # NB: The order values must be changed so that the items are reordered.
+        self.post_data.update({
+            "name": "Frederick Clegg",
+
+            "category_set-TOTAL_FORMS": "7",
+            "category_set-INITIAL_FORMS": "4",
+
+            "category_set-0-order": "14",
+            "category_set-0-id": "1",
+            "category_set-0-collector": "1",
+
+            "category_set-1-order": "13",
+            "category_set-1-id": "2",
+            "category_set-1-collector": "1",
+
+            "category_set-2-order": "1",
+            "category_set-2-id": "3",
+            "category_set-2-collector": "1",
+
+            "category_set-3-order": "0",
+            "category_set-3-id": "4",
+            "category_set-3-collector": "1",
+
+            "category_set-4-order": "",
+            "category_set-4-id": "",
+            "category_set-4-collector": "1",
+
+            "category_set-5-order": "",
+            "category_set-5-id": "",
+            "category_set-5-collector": "1",
+
+            "category_set-6-order": "",
+            "category_set-6-id": "",
+            "category_set-6-collector": "1",
+        })
+        response = self.client.post('/test_admin/admin/admin_views/collector/1/', self.post_data)
+        # Successful post will redirect
+        self.failUnlessEqual(response.status_code, 302)
+
+        # Check that the order values have been applied to the right objects
+        self.failUnlessEqual(self.collector.category_set.count(), 4)
+        self.failUnlessEqual(Category.objects.get(id=1).order, 14)
+        self.failUnlessEqual(Category.objects.get(id=2).order, 13)
+        self.failUnlessEqual(Category.objects.get(id=3).order, 1)
+        self.failUnlessEqual(Category.objects.get(id=4).order, 0)
+
+
+class NeverCacheTests(TestCase):
+    fixtures = ['admin-views-users.xml', 'admin-views-colors.xml', 'admin-views-fabrics.xml']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def testAdminIndex(self):
+        "Check the never-cache status of the main index"
+        response = self.client.get('/test_admin/admin/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testAppIndex(self):
+        "Check the never-cache status of an application index"
+        response = self.client.get('/test_admin/admin/admin_views/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testModelIndex(self):
+        "Check the never-cache status of a model index"
+        response = self.client.get('/test_admin/admin/admin_views/fabric/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testModelAdd(self):
+        "Check the never-cache status of a model add page"
+        response = self.client.get('/test_admin/admin/admin_views/fabric/add/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testModelView(self):
+        "Check the never-cache status of a model edit page"
+        response = self.client.get('/test_admin/admin/admin_views/section/1/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testModelHistory(self):
+        "Check the never-cache status of a model history page"
+        response = self.client.get('/test_admin/admin/admin_views/section/1/history/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testModelDelete(self):
+        "Check the never-cache status of a model delete page"
+        response = self.client.get('/test_admin/admin/admin_views/section/1/delete/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testLogin(self):
+        "Check the never-cache status of login views"
+        self.client.logout()
+        response = self.client.get('/test_admin/admin/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testLogout(self):
+        "Check the never-cache status of logout view"
+        response = self.client.get('/test_admin/admin/logout/')
+        self.failUnlessEqual(get_max_age(response), 0)
+
+    def testPasswordChange(self):
+        "Check the never-cache status of the password change view"
+        self.client.logout()
+        response = self.client.get('/test_admin/password_change/')
+        self.failUnlessEqual(get_max_age(response), None)
+
+    def testPasswordChangeDone(self):
+        "Check the never-cache status of the password change done view"
+        response = self.client.get('/test_admin/admin/password_change/done/')
+        self.failUnlessEqual(get_max_age(response), None)
+
+    def testJsi18n(self):
+        "Check the never-cache status of the Javascript i18n view"
+        response = self.client.get('/test_admin/jsi18n/')
+        self.failUnlessEqual(get_max_age(response), None)

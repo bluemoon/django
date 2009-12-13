@@ -1,7 +1,12 @@
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.importlib import import_module
 
+# Cache of actual callables.
 _standard_context_processors = None
+# We need the CSRF processor no matter what the user has in their settings,
+# because otherwise it is a security vulnerability, and we can't afford to leave
+# this to human error or failure to read migration instructions.
+_builtin_context_processors =  ('django.core.context_processors.csrf',)
 
 class ContextPopException(Exception):
     "pop() has been called more times than push()"
@@ -9,10 +14,11 @@ class ContextPopException(Exception):
 
 class Context(object):
     "A stack container for variable context"
-    def __init__(self, dict_=None, autoescape=True):
+    def __init__(self, dict_=None, autoescape=True, current_app=None):
         dict_ = dict_ or {}
         self.dicts = [dict_]
         self.autoescape = autoescape
+        self.current_app = current_app
 
     def __repr__(self):
         return repr(self.dicts)
@@ -74,7 +80,10 @@ def get_standard_processors():
     global _standard_context_processors
     if _standard_context_processors is None:
         processors = []
-        for path in settings.TEMPLATE_CONTEXT_PROCESSORS:
+        collect = []
+        collect.extend(_builtin_context_processors)
+        collect.extend(settings.TEMPLATE_CONTEXT_PROCESSORS)
+        for path in collect:
             i = path.rfind('.')
             module, attr = path[:i], path[i+1:]
             try:
@@ -96,8 +105,8 @@ class RequestContext(Context):
     Additional processors can be specified as a list of callables
     using the "processors" keyword argument.
     """
-    def __init__(self, request, dict=None, processors=None):
-        Context.__init__(self, dict)
+    def __init__(self, request, dict=None, processors=None, current_app=None):
+        Context.__init__(self, dict, current_app=current_app)
         if processors is None:
             processors = ()
         else:

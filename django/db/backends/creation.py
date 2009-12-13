@@ -25,6 +25,13 @@ class BaseDatabaseCreation(object):
     def __init__(self, connection):
         self.connection = connection
 
+    def _digest(self, *args):
+        """
+        Generates a 32-bit digest of a set of arguments that can be used to
+        shorten identifying names.
+        """
+        return '%x' % (abs(hash(args)) % 4294967296L)  # 2**32
+
     def sql_create_model(self, model, style, known_models=set()):
         """
         Returns the SQL required to create a single model, as a tuple of:
@@ -33,7 +40,7 @@ class BaseDatabaseCreation(object):
         from django.db import models
 
         opts = model._meta
-        if not opts.managed:
+        if not opts.managed or opts.proxy:
             return [], {}
         final_output = []
         table_output = []
@@ -114,7 +121,7 @@ class BaseDatabaseCreation(object):
         "Returns any ALTER TABLE statements to add constraints after the fact."
         from django.db.backends.util import truncate_name
 
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         qn = self.connection.ops.quote_name
         final_output = []
@@ -128,7 +135,7 @@ class BaseDatabaseCreation(object):
                 col = opts.get_field(f.rel.field_name).column
                 # For MySQL, r_name must be unique in the first 64 characters.
                 # So we are careful with character usage here.
-                r_name = '%s_refs_%s_%x' % (r_col, col, abs(hash((r_table, table))))
+                r_name = '%s_refs_%s_%s' % (r_col, col, self._digest(r_table, table))
                 final_output.append(style.SQL_KEYWORD('ALTER TABLE') + ' %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)%s;' % \
                     (qn(r_table), qn(truncate_name(r_name, self.connection.ops.max_name_length())),
                     qn(r_col), qn(table), qn(col),
@@ -187,8 +194,7 @@ class BaseDatabaseCreation(object):
             output.append('\n'.join(table_output))
 
             for r_table, r_col, table, col in deferred:
-                r_name = '%s_refs_%s_%x' % (r_col, col,
-                        abs(hash((r_table, table))))
+                r_name = '%s_refs_%s_%s' % (r_col, col, self._digest(r_table, table))
                 output.append(style.SQL_KEYWORD('ALTER TABLE') + ' %s ADD CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s (%s)%s;' %
                 (qn(r_table),
                 qn(truncate_name(r_name, self.connection.ops.max_name_length())),
@@ -230,7 +236,7 @@ class BaseDatabaseCreation(object):
 
     def sql_indexes_for_model(self, model, style):
         "Returns the CREATE INDEX SQL statements for a single model"
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         output = []
         for f in model._meta.local_fields:
@@ -262,7 +268,7 @@ class BaseDatabaseCreation(object):
 
     def sql_destroy_model(self, model, references_to_delete, style):
         "Return the DROP TABLE and restraint dropping statements for a single model"
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         # Drop the table now
         qn = self.connection.ops.quote_name
@@ -280,7 +286,7 @@ class BaseDatabaseCreation(object):
     def sql_remove_table_constraints(self, model, references_to_delete, style):
         from django.db.backends.util import truncate_name
 
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         output = []
         qn = self.connection.ops.quote_name
@@ -289,7 +295,7 @@ class BaseDatabaseCreation(object):
             col = f.column
             r_table = model._meta.db_table
             r_col = model._meta.get_field(f.rel.field_name).column
-            r_name = '%s_refs_%s_%x' % (col, r_col, abs(hash((table, r_table))))
+            r_name = '%s_refs_%s_%s' % (col, r_col, self._digest(table, r_table))
             output.append('%s %s %s %s;' % \
                 (style.SQL_KEYWORD('ALTER TABLE'),
                 style.SQL_TABLE(qn(table)),

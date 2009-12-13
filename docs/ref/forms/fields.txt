@@ -275,7 +275,7 @@ For each field, we describe the default widget used if you don't specify
     * Default widget: ``CheckboxInput``
     * Empty value: ``False``
     * Normalizes to: A Python ``True`` or ``False`` value.
-    * Validates that the check box is checked (i.e. the value is ``True``) if
+    * Validates that the value is ``True`` (e.g. the check box is checked) if
       the field has ``required=True``.
     * Error message keys: ``required``
 
@@ -287,9 +287,10 @@ For each field, we describe the default widget used if you don't specify
 .. note::
 
     Since all ``Field`` subclasses have ``required=True`` by default, the
-    validation condition here is important. If you want to include a checkbox
-    in your form that can be either checked or unchecked, you must remember to
-    pass in ``required=False`` when creating the ``BooleanField``.
+    validation condition here is important. If you want to include a boolean
+    in your form that can be either ``True`` or ``False`` (e.g. a checked or
+    unchecked checkbox), you must remember to pass in ``required=False`` when
+    creating the ``BooleanField``.
 
 ``CharField``
 ~~~~~~~~~~~~~
@@ -797,6 +798,10 @@ example::
 
         # No empty label
         field2 = forms.ModelChoiceField(queryset=..., empty_label=None)
+
+   Note that if a ``ModelChoiceField`` is required and has a default
+   initial value, no empty choice is created (regardless of the value
+   of ``empty_label``).
 
 ``ModelMultipleChoiceField``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

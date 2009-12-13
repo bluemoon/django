@@ -45,61 +45,61 @@ the full list of conversions:
     Model field                      Form field
     ===============================  ========================================
     ``AutoField``                    Not represented in the form
-    
+
     ``BooleanField``                 ``BooleanField``
-    
+
     ``CharField``                    ``CharField`` with ``max_length`` set to
                                      the model field's ``max_length``
-    
+
     ``CommaSeparatedIntegerField``   ``CharField``
-    
+
     ``DateField``                    ``DateField``
-    
+
     ``DateTimeField``                ``DateTimeField``
-    
+
     ``DecimalField``                 ``DecimalField``
-    
+
     ``EmailField``                   ``EmailField``
-    
+
     ``FileField``                    ``FileField``
-    
+
     ``FilePathField``                ``CharField``
-    
+
     ``FloatField``                   ``FloatField``
-    
+
     ``ForeignKey``                   ``ModelChoiceField`` (see below)
-    
+
     ``ImageField``                   ``ImageField``
-    
+
     ``IntegerField``                 ``IntegerField``
-    
+
     ``IPAddressField``               ``IPAddressField``
-    
+
     ``ManyToManyField``              ``ModelMultipleChoiceField`` (see
                                      below)
-    
+
     ``NullBooleanField``             ``CharField``
-    
+
     ``PhoneNumberField``             ``USPhoneNumberField``
                                      (from ``django.contrib.localflavor.us``)
-    
+
     ``PositiveIntegerField``         ``IntegerField``
-    
+
     ``PositiveSmallIntegerField``    ``IntegerField``
-    
+
     ``SlugField``                    ``SlugField``
-    
+
     ``SmallIntegerField``            ``IntegerField``
-    
-    ``TextField``                    ``CharField`` with 
+
+    ``TextField``                    ``CharField`` with
                                      ``widget=forms.Textarea``
-    
+
     ``TimeField``                    ``TimeField``
-    
+
     ``URLField``                     ``URLField`` with ``verify_exists`` set
                                      to the model field's ``verify_exists``
-    
-    ``XMLField``                     ``CharField`` with 
+
+    ``XMLField``                     ``CharField`` with
                                      ``widget=forms.Textarea``
     ===============================  ========================================
 
@@ -271,7 +271,7 @@ exactly the same way as any other ``forms`` form. For example, the
 ``is_valid()`` method is used to check for validity, the ``is_multipart()``
 method is used to determine whether a form requires multipart file upload (and
 hence whether ``request.FILES`` must be passed to the form), etc. See
-:ref:`topics-forms-index` for more information.
+:ref:`binding-uploaded-files` for more information.
 
 Using a subset of fields on the form
 ------------------------------------
@@ -323,16 +323,19 @@ Since the Author model has only 3 fields, 'name', 'title', and
     to be empty, and does not provide a default value for the missing fields,
     any attempt to ``save()`` a ``ModelForm`` with missing fields will fail.
     To avoid this failure, you must instantiate your model with initial values
-    for the missing, but required fields, or use ``save(commit=False)`` and
-    manually set any extra required fields::
+    for the missing, but required fields::
 
-        instance = Instance(required_field='value')
-        form = InstanceForm(request.POST, instance=instance)
-        new_instance = form.save()
+        author = Author(title='Mr')
+        form = PartialAuthorForm(request.POST, instance=author)
+        form.save()
 
-        instance = form.save(commit=False)
-        instance.required_field = 'new value'
-        new_instance = instance.save()
+    Alternatively, you can use ``save(commit=False)`` and manually set
+    any extra required fields::
+
+        form = PartialAuthorForm(request.POST)
+        author = form.save(commit=False)
+        author.title = 'Mr'
+        author.save()
 
     See the `section on saving forms`_ for more details on using
     ``save(commit=False)``.
@@ -368,6 +371,35 @@ parameter when declaring the form field::
    ...     class Meta:
    ...         model = Article
 
+.. note::
+
+    If you explicitly instantiate a form field like this, Django assumes that you
+    want to completely define its behavior; therefore, default attributes (such as
+    ``max_length`` or ``required``) are not drawn from the corresponding model. If
+    you want to maintain the behavior specified in the model, you must set the
+    relevant arguments explicitly when declaring the form field.
+
+    For example, if the ``Article`` model looks like this::
+
+        class Article(models.Model):
+            headline = models.CharField(max_length=200, null=True, blank=True,
+                                        help_text="Use puns liberally")
+            content = models.TextField()
+
+    and you want to do some custom validation for ``headline``, while keeping
+    the ``blank`` and ``help_text`` values as specified, you might define
+    ``ArticleForm`` like this::
+
+        class ArticleForm(ModelForm):
+            headline = MyFormField(max_length=200, required=False,
+                                   help_text="Use puns liberally")
+
+            class Meta:
+                model = Article
+
+    See the :ref:`form field documentation <ref-forms-fields>` for more information
+    on fields and their arguments.
+
 Changing the order of fields
 ----------------------------
 
@@ -394,16 +426,26 @@ to be rendered first, we could specify the following ``ModelForm``::
     ...         model = Book
     ...         fields = ['title', 'author']
 
+.. _overriding-modelform-clean-method:
 
 Overriding the clean() method
 -----------------------------
 
 You can override the ``clean()`` method on a model form to provide additional
-validation in the same way you can on a normal form. However, by default the
-``clean()`` method validates the uniqueness of fields that are marked as unique
-or unique_together on the model. Therefore, if you would like to override
-the ``clean()`` method and maintain the default validation, you must call the
-parent class's ``clean()`` method.
+validation in the same way you can on a normal form.
+
+In this regard, model forms have two specific characteristics when compared to
+forms:
+
+By default the ``clean()`` method validates the uniqueness of fields that are
+marked as ``unique``, ``unique_together`` or ``unique_for_date|month|year`` on
+the model.  Therefore, if you would like to override the ``clean()`` method and
+maintain the default validation, you must call the parent class's ``clean()``
+method.
+
+Also, a model form instance bound to a model object will contain a
+``self.instance`` attribute that gives model form methods access to that
+specific model instance.
 
 Form inheritance
 ----------------
@@ -487,7 +529,7 @@ queryset that includes all objects in the model (e.g.,
 
 Alternatively, you can create a subclass that sets ``self.queryset`` in
 ``__init__``::
-    
+
     from django.forms.models import BaseModelFormSet
 
     class BaseAuthorFormSet(BaseModelFormSet):
@@ -498,6 +540,12 @@ Alternatively, you can create a subclass that sets ``self.queryset`` in
 Then, pass your ``BaseAuthorFormSet`` class to the factory function::
 
     >>> AuthorFormSet = modelformset_factory(Author, formset=BaseAuthorFormSet)
+
+If you want to return a formset that doesn't include *any* pre-existing
+instances of the model, you can specify an empty QuerySet::
+
+   >>> AuthorFormSet(queryset=Author.objects.none())
+
 
 Controlling which fields are used with ``fields`` and ``exclude``
 -----------------------------------------------------------------
@@ -552,7 +600,7 @@ Limiting the number of editable objects
 
 As with regular formsets, you can use the ``max_num`` parameter to
 ``modelformset_factory`` to limit the number of forms displayed. With
-model formsets, this properly limits the query to select only the maximum
+model formsets, this property limits the query to select only the maximum
 number of objects needed::
 
     >>> Author.objects.order_by('name')
@@ -563,10 +611,11 @@ number of objects needed::
     >>> formset.initial
     [{'id': 1, 'name': u'Charles Baudelaire'}, {'id': 3, 'name': u'Paul Verlaine'}]
 
-If the value of ``max_num`` is less than the total objects returned, the
-formset will fill the rest with extra forms::
+If the value of ``max_num`` is higher than the number of objects returned, up to
+``extra`` additional blank forms will be added to the formset, so long as the
+total number of forms does not exceed ``max_num``::
 
-    >>> AuthorFormSet = modelformset_factory(Author, max_num=4, extra=1)
+    >>> AuthorFormSet = modelformset_factory(Author, max_num=4, extra=2)
     >>> formset = AuthorFormSet(queryset=Author.objects.order_by('name'))
     >>> for form in formset.forms:
     ...     print form.as_table()
@@ -599,8 +648,25 @@ than that of a "normal" formset. The only difference is that we call
 ``formset.save()`` to save the data into the database. (This was described
 above, in :ref:`saving-objects-in-the-formset`.)
 
+Overiding ``clean()`` on a ``model_formset``
+--------------------------------------------
+
+Just like with ``ModelForms``, by default the ``clean()`` method of a
+``model_formset`` will validate that none of the items in the formset violate
+the unique constraints on your model (either ``unique``, ``unique_together`` or
+``unique_for_date|month|year``).  If you want to overide the ``clean()`` method
+on a ``model_formset`` and maintain this validation, you must call the parent
+class's ``clean`` method::
+
+    class MyModelFormSet(BaseModelFormSet):
+        def clean(self):
+            super(MyModelFormSet, self).clean()
+            # example custom validation across forms in the formset:
+            for form in self.forms:
+                # your custom formset validation
+
 Using a custom queryset
-~~~~~~~~~~~~~~~~~~~~~~~
+-----------------------
 
 As stated earlier, you can override the default queryset used by the model
 formset::
@@ -623,7 +689,9 @@ Note that we pass the ``queryset`` argument in both the ``POST`` and ``GET``
 cases in this example.
 
 Using the formset in the template
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+---------------------------------
+
+.. highlight:: html+django
 
 There are three ways to render a formset in a Django template.
 
@@ -678,6 +746,8 @@ the model formset, in the ``POST`` case, will work correctly. (This example
 assumes a primary key named ``id``. If you've explicitly defined your own
 primary key that isn't called ``id``, make sure it gets rendered.)
 
+.. highlight:: python
+
 Inline formsets
 ===============
 
@@ -718,7 +788,7 @@ the following model::
 
 To resolve this, you can use ``fk_name`` to ``inlineformset_factory``::
 
-    >>> FrienshipFormSet = inlineformset_factory(Friend, Friendship, fk_name="from_friend")
+    >>> FriendshipFormSet = inlineformset_factory(Friend, Friendship, fk_name="from_friend")
 
 Using an inline formset in a view
 ---------------------------------

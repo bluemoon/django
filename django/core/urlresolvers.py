@@ -10,6 +10,7 @@ a string) and returns a tuple in this format:
 import re
 
 from django.http import Http404
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured, ViewDoesNotExist
 from django.utils.datastructures import MultiValueDict
 from django.utils.encoding import iri_to_uri, force_unicode, smart_str
@@ -31,6 +32,9 @@ _callable_cache = {} # Maps view and url pattern names to their view functions.
 # the current thread (which is the only one we ever access), it is assumed to
 # be empty.
 _prefixes = {}
+
+# Overridden URLconfs for each thread are stored here.
+_urlconfs = {}
 
 class Resolver404(Http404):
     pass
@@ -139,7 +143,7 @@ class RegexURLPattern(object):
     callback = property(_get_callback)
 
 class RegexURLResolver(object):
-    def __init__(self, regex, urlconf_name, default_kwargs=None):
+    def __init__(self, regex, urlconf_name, default_kwargs=None, app_name=None, namespace=None):
         # regex is a string representing a regular expression.
         # urlconf_name is a string representing the module containing URLconfs.
         self.regex = re.compile(regex, re.UNICODE)
@@ -148,19 +152,29 @@ class RegexURLResolver(object):
             self._urlconf_module = self.urlconf_name
         self.callback = None
         self.default_kwargs = default_kwargs or {}
-        self._reverse_dict = MultiValueDict()
+        self.namespace = namespace
+        self.app_name = app_name
+        self._reverse_dict = None
+        self._namespace_dict = None
+        self._app_dict = None
 
     def __repr__(self):
-        return '<%s %s %s>' % (self.__class__.__name__, self.urlconf_name, self.regex.pattern)
+        return '<%s %s (%s:%s) %s>' % (self.__class__.__name__, self.urlconf_name, self.app_name, self.namespace, self.regex.pattern)
 
-    def _get_reverse_dict(self):
-        if not self._reverse_dict:
-            lookups = MultiValueDict()
-            for pattern in reversed(self.url_patterns):
-                p_pattern = pattern.regex.pattern
-                if p_pattern.startswith('^'):
-                    p_pattern = p_pattern[1:]
-                if isinstance(pattern, RegexURLResolver):
+    def _populate(self):
+        lookups = MultiValueDict()
+        namespaces = {}
+        apps = {}
+        for pattern in reversed(self.url_patterns):
+            p_pattern = pattern.regex.pattern
+            if p_pattern.startswith('^'):
+                p_pattern = p_pattern[1:]
+            if isinstance(pattern, RegexURLResolver):
+                if pattern.namespace:
+                    namespaces[pattern.namespace] = (p_pattern, pattern)
+                    if pattern.app_name:
+                        apps.setdefault(pattern.app_name, []).append(pattern.namespace)
+                else:
                     parent = normalize(pattern.regex.pattern)
                     for name in pattern.reverse_dict:
                         for matches, pat in pattern.reverse_dict.getlist(name):
@@ -168,13 +182,35 @@ class RegexURLResolver(object):
                             for piece, p_args in parent:
                                 new_matches.extend([(piece + suffix, p_args + args) for (suffix, args) in matches])
                             lookups.appendlist(name, (new_matches, p_pattern + pat))
-                else:
-                    bits = normalize(p_pattern)
-                    lookups.appendlist(pattern.callback, (bits, p_pattern))
-                    lookups.appendlist(pattern.name, (bits, p_pattern))
-            self._reverse_dict = lookups
+                    for namespace, (prefix, sub_pattern) in pattern.namespace_dict.items():
+                        namespaces[namespace] = (p_pattern + prefix, sub_pattern)
+                    for app_name, namespace_list in pattern.app_dict.items():
+                        apps.setdefault(app_name, []).extend(namespace_list)
+            else:
+                bits = normalize(p_pattern)
+                lookups.appendlist(pattern.callback, (bits, p_pattern))
+                lookups.appendlist(pattern.name, (bits, p_pattern))
+        self._reverse_dict = lookups
+        self._namespace_dict = namespaces
+        self._app_dict = apps
+
+    def _get_reverse_dict(self):
+        if self._reverse_dict is None:
+            self._populate()
         return self._reverse_dict
     reverse_dict = property(_get_reverse_dict)
+
+    def _get_namespace_dict(self):
+        if self._namespace_dict is None:
+            self._populate()
+        return self._namespace_dict
+    namespace_dict = property(_get_namespace_dict)
+
+    def _get_app_dict(self):
+        if self._app_dict is None:
+            self._populate()
+        return self._app_dict
+    app_dict = property(_get_app_dict)
 
     def resolve(self, path):
         tried = []
@@ -185,7 +221,11 @@ class RegexURLResolver(object):
                 try:
                     sub_match = pattern.resolve(new_path)
                 except Resolver404, e:
-                    tried.extend([(pattern.regex.pattern + '   ' + t) for t in e.args[0]['tried']])
+                    sub_tried = e.args[0].get('tried')
+                    if sub_tried is not None:
+                        tried.extend([(pattern.regex.pattern + '   ' + t) for t in sub_tried])
+                    else:
+                        tried.append(pattern.regex.pattern)
                 else:
                     if sub_match:
                         sub_match_dict = dict([(smart_str(k), v) for k, v in match.groupdict().items()])
@@ -195,6 +235,7 @@ class RegexURLResolver(object):
                         return sub_match[0], sub_match[1], sub_match_dict
                     tried.append(pattern.regex.pattern)
             raise Resolver404, {'tried': tried, 'path': new_path}
+        raise Resolver404, {'path' : path}
 
     def _get_urlconf_module(self):
         try:
@@ -250,18 +291,70 @@ class RegexURLResolver(object):
                     candidate = result % unicode_kwargs
                 if re.search(u'^%s' % pattern, candidate, re.UNICODE):
                     return candidate
+        # lookup_view can be URL label, or dotted path, or callable, Any of
+        # these can be passed in at the top, but callables are not friendly in
+        # error messages.
+        m = getattr(lookup_view, '__module__', None)
+        n = getattr(lookup_view, '__name__', None)
+        if m is not None and n is not None:
+            lookup_view_s = "%s.%s" % (m, n)
+        else:
+            lookup_view_s = lookup_view
         raise NoReverseMatch("Reverse for '%s' with arguments '%s' and keyword "
-                "arguments '%s' not found." % (lookup_view, args, kwargs))
+                "arguments '%s' not found." % (lookup_view_s, args, kwargs))
 
 def resolve(path, urlconf=None):
+    if urlconf is None:
+        urlconf = get_urlconf()
     return get_resolver(urlconf).resolve(path)
 
-def reverse(viewname, urlconf=None, args=None, kwargs=None, prefix=None):
+def reverse(viewname, urlconf=None, args=None, kwargs=None, prefix=None, current_app=None):
+    if urlconf is None:
+        urlconf = get_urlconf()
+    resolver = get_resolver(urlconf)
     args = args or []
     kwargs = kwargs or {}
+
     if prefix is None:
         prefix = get_script_prefix()
-    return iri_to_uri(u'%s%s' % (prefix, get_resolver(urlconf).reverse(viewname,
+
+    if not isinstance(viewname, basestring):
+        view = viewname
+    else:
+        parts = viewname.split(':')
+        parts.reverse()
+        view = parts[0]
+        path = parts[1:]
+
+        resolved_path = []
+        while path:
+            ns = path.pop()
+
+            # Lookup the name to see if it could be an app identifier
+            try:
+                app_list = resolver.app_dict[ns]
+                # Yes! Path part matches an app in the current Resolver
+                if current_app and current_app in app_list:
+                    # If we are reversing for a particular app, use that namespace
+                    ns = current_app
+                elif ns not in app_list:
+                    # The name isn't shared by one of the instances (i.e., the default)
+                    # so just pick the first instance as the default.
+                    ns = app_list[0]
+            except KeyError:
+                pass
+
+            try:
+                extra, resolver = resolver.namespace_dict[ns]
+                resolved_path.append(ns)
+                prefix = prefix + extra
+            except KeyError, key:
+                if resolved_path:
+                    raise NoReverseMatch("%s is not a registered namespace inside '%s'" % (key, ':'.join(resolved_path)))
+                else:
+                    raise NoReverseMatch("%s is not a registered namespace" % key)
+
+    return iri_to_uri(u'%s%s' % (prefix, resolver.reverse(view,
             *args, **kwargs)))
 
 def clear_url_caches():
@@ -286,3 +379,25 @@ def get_script_prefix():
     """
     return _prefixes.get(currentThread(), u'/')
 
+def set_urlconf(urlconf_name):
+    """
+    Sets the URLconf for the current thread (overriding the default one in
+    settings). Set to None to revert back to the default.
+    """
+    thread = currentThread()
+    if urlconf_name:
+        _urlconfs[thread] = urlconf_name
+    else:
+        # faster than wrapping in a try/except
+        if thread in _urlconfs:
+            del _urlconfs[thread]
+
+def get_urlconf(default=None):
+    """
+    Returns the root URLconf to use for the current thread if it has been
+    changed from the default one.
+    """
+    thread = currentThread()
+    if thread in _urlconfs:
+        return _urlconfs[thread]
+    return default

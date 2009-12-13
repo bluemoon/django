@@ -22,11 +22,14 @@ class GenericSite(object):
     name = 'my site'
 
 def get_root_path():
-    from django.contrib import admin
     try:
-        return urlresolvers.reverse(admin.site.root, args=[''])
+        return urlresolvers.reverse('admin:index')
     except urlresolvers.NoReverseMatch:
-        return getattr(settings, "ADMIN_SITE_ROOT_URL", "/admin/")
+        from django.contrib import admin
+        try:
+            return urlresolvers.reverse(admin.site.root, args=[''])
+        except urlresolvers.NoReverseMatch:
+            return getattr(settings, "ADMIN_SITE_ROOT_URL", "/admin/")
 
 def doc_index(request):
     if not utils.docutils_is_available:
@@ -179,7 +182,7 @@ model_index = staff_member_required(model_index)
 def model_detail(request, app_label, model_name):
     if not utils.docutils_is_available:
         return missing_docutils_page(request)
-        
+
     # Get the model class.
     try:
         app_mod = models.get_app(app_label)
@@ -214,6 +217,22 @@ def model_detail(request, app_label, model_name):
             'help_text': field.help_text,
         })
 
+    # Gather many-to-many fields.
+    for field in opts.many_to_many:
+        data_type = related_object_name = field.rel.to.__name__
+        app_label = field.rel.to._meta.app_label
+        verbose = _("related `%(app_label)s.%(object_name)s` objects") % {'app_label': app_label, 'object_name': data_type}
+        fields.append({
+            'name': "%s.all" % field.name,
+            "data_type": 'List',
+            'verbose': utils.parse_rst(_("all %s") % verbose , 'model', _('model:') + opts.module_name),
+        })
+        fields.append({
+            'name'      : "%s.count" % field.name,
+            'data_type' : 'Integer',
+            'verbose'   : utils.parse_rst(_("number of %s") % verbose , 'model', _('model:') + opts.module_name),
+        })
+
     # Gather model methods.
     for func_name, func in model.__dict__.items():
         if (inspect.isfunction(func) and len(inspect.getargspec(func)[0]) == 1):
@@ -233,7 +252,7 @@ def model_detail(request, app_label, model_name):
             })
 
     # Gather related objects
-    for rel in opts.get_all_related_objects():
+    for rel in opts.get_all_related_objects() + opts.get_all_related_many_to_many_objects():
         verbose = _("related `%(app_label)s.%(object_name)s` objects") % {'app_label': rel.opts.app_label, 'object_name': rel.opts.object_name}
         accessor = rel.get_accessor_name()
         fields.append({
@@ -307,43 +326,20 @@ def get_return_data_type(func_name):
             return 'Integer'
     return ''
 
-# Maps Field objects to their human-readable data types, as strings.
-# Column-type strings can contain format strings; they'll be interpolated
-# against the values of Field.__dict__ before being output.
-# If a column type is set to None, it won't be included in the output.
-DATA_TYPE_MAPPING = {
-    'AutoField'                 : _('Integer'),
-    'BooleanField'              : _('Boolean (Either True or False)'),
-    'CharField'                 : _('String (up to %(max_length)s)'),
-    'CommaSeparatedIntegerField': _('Comma-separated integers'),
-    'DateField'                 : _('Date (without time)'),
-    'DateTimeField'             : _('Date (with time)'),
-    'DecimalField'              : _('Decimal number'),
-    'EmailField'                : _('E-mail address'),
-    'FileField'                 : _('File path'),
-    'FilePathField'             : _('File path'),
-    'FloatField'                : _('Floating point number'),
-    'ForeignKey'                : _('Integer'),
-    'ImageField'                : _('File path'),
-    'IntegerField'              : _('Integer'),
-    'IPAddressField'            : _('IP address'),
-    'ManyToManyField'           : '',
-    'NullBooleanField'          : _('Boolean (Either True, False or None)'),
-    'OneToOneField'             : _('Relation to parent model'),
-    'PhoneNumberField'          : _('Phone number'),
-    'PositiveIntegerField'      : _('Integer'),
-    'PositiveSmallIntegerField' : _('Integer'),
-    'SlugField'                 : _('String (up to %(max_length)s)'),
-    'SmallIntegerField'         : _('Integer'),
-    'TextField'                 : _('Text'),
-    'TimeField'                 : _('Time'),
-    'URLField'                  : _('URL'),
-    'USStateField'              : _('U.S. state (two uppercase letters)'),
-    'XMLField'                  : _('XML text'),
-}
-
 def get_readable_field_data_type(field):
-    return DATA_TYPE_MAPPING[field.get_internal_type()] % field.__dict__
+    """Returns the first line of a doc string for a given field type, if it 
+    exists.  Fields' docstrings can contain format strings, which will be 
+    interpolated against the values of Field.__dict__ before being output.  
+    If no docstring is given, a sensible value will be auto-generated from 
+    the field's class name."""
+
+    if field.__doc__:
+        doc = field.__doc__.split('\n')[0]
+        return _(doc) % field.__dict__
+    else:
+        return _(u'Field of type: %(field_type)s') % {
+            'field_type': field.__class__.__name__
+        } 
 
 def extract_views_from_urlpatterns(urlpatterns, base=''):
     """

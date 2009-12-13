@@ -6,6 +6,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin import widgets
 from django.contrib.admin import helpers
 from django.contrib.admin.util import unquote, flatten_fieldsets, get_deleted_objects, model_ngettext, model_format_dict
+from django.contrib import messages
+from django.views.decorators.csrf import csrf_protect
 from django.core.exceptions import PermissionDenied
 from django.db import models, transaction
 from django.db.models.fields import BLANK_CHOICE_DASH
@@ -18,7 +20,7 @@ from django.utils.safestring import mark_safe
 from django.utils.functional import curry
 from django.utils.text import capfirst, get_text_list
 from django.utils.translation import ugettext as _
-from django.utils.translation import ngettext, ugettext_lazy
+from django.utils.translation import ungettext, ugettext_lazy
 from django.utils.encoding import force_unicode
 try:
     set
@@ -108,10 +110,10 @@ class BaseModelAdmin(object):
 
         # If we've got overrides for the formfield defined, use 'em. **kwargs
         # passed to formfield_for_dbfield override the defaults.
-        for klass in db_field.__class__.mro(): 
-            if klass in self.formfield_overrides: 
-                kwargs = dict(self.formfield_overrides[klass], **kwargs) 
-                return db_field.formfield(**kwargs) 
+        for klass in db_field.__class__.mro():
+            if klass in self.formfield_overrides:
+                kwargs = dict(self.formfield_overrides[klass], **kwargs)
+                return db_field.formfield(**kwargs)
 
         # For any other type of field, just call its formfield() method.
         return db_field.formfield(**kwargs)
@@ -152,8 +154,9 @@ class BaseModelAdmin(object):
         """
         Get a form Field for a ManyToManyField.
         """
-        # If it uses an intermediary model, don't show field in admin.
-        if db_field.rel.through is not None:
+        # If it uses an intermediary model that isn't auto created, don't show
+        # a field in admin.
+        if not db_field.rel.through._meta.auto_created:
             return None
 
         if db_field.name in self.raw_id_fields:
@@ -226,24 +229,24 @@ class ModelAdmin(BaseModelAdmin):
                 return self.admin_site.admin_view(view)(*args, **kwargs)
             return update_wrapper(wrapper, view)
 
-        info = self.admin_site.name, self.model._meta.app_label, self.model._meta.module_name
+        info = self.model._meta.app_label, self.model._meta.module_name
 
         urlpatterns = patterns('',
             url(r'^$',
                 wrap(self.changelist_view),
-                name='%sadmin_%s_%s_changelist' % info),
+                name='%s_%s_changelist' % info),
             url(r'^add/$',
                 wrap(self.add_view),
-                name='%sadmin_%s_%s_add' % info),
+                name='%s_%s_add' % info),
             url(r'^(.+)/history/$',
                 wrap(self.history_view),
-                name='%sadmin_%s_%s_history' % info),
+                name='%s_%s_history' % info),
             url(r'^(.+)/delete/$',
                 wrap(self.delete_view),
-                name='%sadmin_%s_%s_delete' % info),
+                name='%s_%s_delete' % info),
             url(r'^(.+)/$',
                 wrap(self.change_view),
-                name='%sadmin_%s_%s_change' % info),
+                name='%s_%s_change' % info),
         )
         return urlpatterns
 
@@ -336,10 +339,12 @@ class ModelAdmin(BaseModelAdmin):
             exclude = []
         else:
             exclude = list(self.exclude)
+        # if exclude is an empty list we pass None to be consistant with the
+        # default on modelform_factory
         defaults = {
             "form": self.form,
             "fields": fields,
-            "exclude": exclude + kwargs.get("exclude", []),
+            "exclude": (exclude + kwargs.get("exclude", [])) or None,
             "formfield_callback": curry(self.formfield_for_dbfield, request=request),
         }
         defaults.update(kwargs)
@@ -437,26 +442,26 @@ class ModelAdmin(BaseModelAdmin):
         # want *any* actions enabled on this page.
         if self.actions is None:
             return []
-            
+
         actions = []
-        
+
         # Gather actions from the admin site first
         for (name, func) in self.admin_site.actions:
             description = getattr(func, 'short_description', name.replace('_', ' '))
             actions.append((func, name, description))
-        
-        # Then gather them from the model admin and all parent classes, 
+
+        # Then gather them from the model admin and all parent classes,
         # starting with self and working back up.
         for klass in self.__class__.mro()[::-1]:
             class_actions = getattr(klass, 'actions', [])
             # Avoid trying to iterate over None
             if not class_actions:
-                continue 
+                continue
             actions.extend([self.get_action(action) for action in class_actions])
-        
+
         # get_action might have returned None, so filter any of those out.
         actions = filter(None, actions)
-        
+
         # Convert the actions into a SortedDict keyed by name
         # and sorted by description.
         actions.sort(lambda a,b: cmp(a[2].lower(), b[2].lower()))
@@ -464,7 +469,7 @@ class ModelAdmin(BaseModelAdmin):
             (name, (func, name, desc))
             for func, name, desc in actions
         ])
-        
+
         return actions
 
     def get_action_choices(self, request, default_choices=BLANK_CHOICE_DASH):
@@ -480,7 +485,7 @@ class ModelAdmin(BaseModelAdmin):
 
     def get_action(self, action):
         """
-        Return a given action from a parameter, which can either be a calable,
+        Return a given action from a parameter, which can either be a callable,
         or the name of a method on the ModelAdmin.  Return is a tuple of
         (callable, name, description).
         """
@@ -488,20 +493,20 @@ class ModelAdmin(BaseModelAdmin):
         if callable(action):
             func = action
             action = action.__name__
-            
+
         # Next, look for a method. Grab it off self.__class__ to get an unbound
         # method instead of a bound one; this ensures that the calling
         # conventions are the same for functions and methods.
         elif hasattr(self.__class__, action):
             func = getattr(self.__class__, action)
-        
+
         # Finally, look for a named method on the admin site
         else:
             try:
                 func = self.admin_site.get_action(action)
             except KeyError:
                 return None
-            
+
         if hasattr(func, 'short_description'):
             description = func.short_description
         else:
@@ -537,9 +542,9 @@ class ModelAdmin(BaseModelAdmin):
     def message_user(self, request, message):
         """
         Send a message to the user. The default implementation
-        posts a message using the auth Message object.
+        posts a message using the django.contrib.messages backend.
         """
-        request.user.message_set.create(message=message)
+        messages.info(request, message)
 
     def save_form(self, request, form, change):
         """
@@ -580,11 +585,12 @@ class ModelAdmin(BaseModelAdmin):
             'save_on_top': self.save_on_top,
             'root_path': self.admin_site.root_path,
         })
+        context_instance = template.RequestContext(request, current_app=self.admin_site.name)
         return render_to_response(self.change_form_template or [
             "admin/%s/%s/change_form.html" % (app_label, opts.object_name.lower()),
             "admin/%s/change_form.html" % app_label,
             "admin/change_form.html"
-        ], context, context_instance=template.RequestContext(request))
+        ], context, context_instance=context_instance)
 
     def response_add(self, request, obj, post_url_continue='../%s/'):
         """
@@ -664,7 +670,7 @@ class ModelAdmin(BaseModelAdmin):
         data = request.POST.copy()
         data.pop(helpers.ACTION_CHECKBOX_NAME, None)
         data.pop("index", None)
-        
+
         # Use the action whose button was pushed
         try:
             data.update({'action': data.getlist('action')[action_index]})
@@ -673,7 +679,7 @@ class ModelAdmin(BaseModelAdmin):
             # POST data, so by deleting action it'll fail the validation check
             # below. So no need to do anything here
             pass
-        
+
         action_form = self.action_form(data, auto_id=None)
         action_form.fields['action'].choices = self.get_action_choices(request)
 
@@ -686,6 +692,9 @@ class ModelAdmin(BaseModelAdmin):
             # perform an action on it, so bail.
             selected = request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)
             if not selected:
+                # Reminder that something needs to be selected or nothing will happen
+                msg = "Items must be selected in order to perform actions on them. No items have been changed."
+                self.message_user(request, _(msg))
                 return None
 
             response = func(self, request, queryset.filter(pk__in=selected))
@@ -697,7 +706,12 @@ class ModelAdmin(BaseModelAdmin):
                 return response
             else:
                 return HttpResponseRedirect(".")
+        else:
+            msg = "No action selected."
+            self.message_user(request, _(msg))
 
+    @csrf_protect
+    @transaction.commit_on_success
     def add_view(self, request, form_url='', extra_context=None):
         "The 'add' admin view for this model."
         model = self.model
@@ -778,9 +792,10 @@ class ModelAdmin(BaseModelAdmin):
             'app_label': opts.app_label,
         }
         context.update(extra_context or {})
-        return self.render_change_form(request, context, add=True)
-    add_view = transaction.commit_on_success(add_view)
+        return self.render_change_form(request, context, form_url=form_url, add=True)
 
+    @csrf_protect
+    @transaction.commit_on_success
     def change_view(self, request, object_id, extra_context=None):
         "The 'change' admin view for this model."
         model = self.model
@@ -801,7 +816,7 @@ class ModelAdmin(BaseModelAdmin):
             raise Http404(_('%(name)s object with primary key %(key)r does not exist.') % {'name': force_unicode(opts.verbose_name), 'key': escape(object_id)})
 
         if request.method == 'POST' and request.POST.has_key("_saveasnew"):
-            return self.add_view(request, form_url='../../add/')
+            return self.add_view(request, form_url='../add/')
 
         ModelForm = self.get_form(request, obj)
         formsets = []
@@ -868,8 +883,8 @@ class ModelAdmin(BaseModelAdmin):
         }
         context.update(extra_context or {})
         return self.render_change_form(request, context, change=True, obj=obj)
-    change_view = transaction.commit_on_success(change_view)
 
+    @csrf_protect
     def changelist_view(self, request, extra_context=None):
         "The 'change list' admin view for this model."
         from django.contrib.admin.views.main import ChangeList, ERROR_FLAG
@@ -877,10 +892,10 @@ class ModelAdmin(BaseModelAdmin):
         app_label = opts.app_label
         if not self.has_change_permission(request, None):
             raise PermissionDenied
-        
+
         # Check actions to see if any are available on this changelist
         actions = self.get_actions(request)
-        
+
         # Remove action checkboxes if there aren't any actions available.
         list_display = list(self.list_display)
         if not actions:
@@ -888,7 +903,7 @@ class ModelAdmin(BaseModelAdmin):
                 list_display.remove('action_checkbox')
             except ValueError:
                 pass
-        
+
         try:
             cl = ChangeList(request, self.model, list_display, self.list_display_links, self.list_filter,
                 self.date_hierarchy, self.search_fields, self.list_select_related, self.list_per_page, self.list_editable, self)
@@ -901,7 +916,7 @@ class ModelAdmin(BaseModelAdmin):
             if ERROR_FLAG in request.GET.keys():
                 return render_to_response('admin/invalid_setup.html', {'title': _('Database error')})
             return HttpResponseRedirect(request.path + '?' + ERROR_FLAG + '=1')
-                
+
         # If the request was POSTed, this might be a bulk action or a bulk edit.
         # Try to look up an action first, but if this isn't an action the POST
         # will fall through to the bulk edit check, below.
@@ -935,11 +950,11 @@ class ModelAdmin(BaseModelAdmin):
                         name = force_unicode(opts.verbose_name)
                     else:
                         name = force_unicode(opts.verbose_name_plural)
-                    msg = ngettext("%(count)s %(name)s was changed successfully.",
-                                   "%(count)s %(name)s were changed successfully.",
-                                   changecount) % {'count': changecount,
-                                                   'name': name,
-                                                   'obj': force_unicode(obj)}
+                    msg = ungettext("%(count)s %(name)s was changed successfully.",
+                                    "%(count)s %(name)s were changed successfully.",
+                                    changecount) % {'count': changecount,
+                                                    'name': name,
+                                                    'obj': force_unicode(obj)}
                     self.message_user(request, msg)
 
                 return HttpResponseRedirect(request.get_full_path())
@@ -975,12 +990,14 @@ class ModelAdmin(BaseModelAdmin):
             'actions_on_bottom': self.actions_on_bottom,
         }
         context.update(extra_context or {})
+        context_instance = template.RequestContext(request, current_app=self.admin_site.name)
         return render_to_response(self.change_list_template or [
             'admin/%s/%s/change_list.html' % (app_label, opts.object_name.lower()),
             'admin/%s/change_list.html' % app_label,
             'admin/change_list.html'
-        ], context, context_instance=template.RequestContext(request))
+        ], context, context_instance=context_instance)
 
+    @csrf_protect
     def delete_view(self, request, object_id, extra_context=None):
         "The 'delete' admin view for this model."
         opts = self.model._meta
@@ -1010,9 +1027,9 @@ class ModelAdmin(BaseModelAdmin):
             if perms_needed:
                 raise PermissionDenied
             obj_display = force_unicode(obj)
+            self.log_deletion(request, obj, obj_display)
             obj.delete()
 
-            self.log_deletion(request, obj, obj_display)
             self.message_user(request, _('The %(name)s "%(obj)s" was deleted successfully.') % {'name': force_unicode(opts.verbose_name), 'obj': force_unicode(obj_display)})
 
             if not self.has_change_permission(request, None):
@@ -1030,11 +1047,12 @@ class ModelAdmin(BaseModelAdmin):
             "app_label": app_label,
         }
         context.update(extra_context or {})
+        context_instance = template.RequestContext(request, current_app=self.admin_site.name)
         return render_to_response(self.delete_confirmation_template or [
             "admin/%s/%s/delete_confirmation.html" % (app_label, opts.object_name.lower()),
             "admin/%s/delete_confirmation.html" % app_label,
             "admin/delete_confirmation.html"
-        ], context, context_instance=template.RequestContext(request))
+        ], context, context_instance=context_instance)
 
     def history_view(self, request, object_id, extra_context=None):
         "The 'history' admin view for this model."
@@ -1047,7 +1065,7 @@ class ModelAdmin(BaseModelAdmin):
             content_type__id__exact = ContentType.objects.get_for_model(model).id
         ).select_related().order_by('action_time')
         # If no history was found, see whether this object even exists.
-        obj = get_object_or_404(model, pk=object_id)
+        obj = get_object_or_404(model, pk=unquote(object_id))
         context = {
             'title': _('Change history: %s') % force_unicode(obj),
             'action_list': action_list,
@@ -1057,11 +1075,12 @@ class ModelAdmin(BaseModelAdmin):
             'app_label': app_label,
         }
         context.update(extra_context or {})
+        context_instance = template.RequestContext(request, current_app=self.admin_site.name)
         return render_to_response(self.object_history_template or [
             "admin/%s/%s/object_history.html" % (app_label, opts.object_name.lower()),
             "admin/%s/object_history.html" % app_label,
             "admin/object_history.html"
-        ], context, context_instance=template.RequestContext(request))
+        ], context, context_instance=context_instance)
 
     #
     # DEPRECATED methods.
@@ -1138,12 +1157,14 @@ class InlineModelAdmin(BaseModelAdmin):
             exclude = []
         else:
             exclude = list(self.exclude)
+        # if exclude is an empty list we use None, since that's the actual
+        # default
         defaults = {
             "form": self.form,
             "formset": self.formset,
             "fk_name": self.fk_name,
             "fields": fields,
-            "exclude": exclude + kwargs.get("exclude", []),
+            "exclude": (exclude + kwargs.get("exclude", [])) or None,
             "formfield_callback": curry(self.formfield_for_dbfield, request=request),
             "extra": self.extra,
             "max_num": self.max_num,

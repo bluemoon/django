@@ -67,6 +67,9 @@ class Author(models.Model):
     num = models.IntegerField(unique=True)
     extra = models.ForeignKey(ExtraInfo)
 
+    class Meta:
+        ordering = ['name']
+
     def __unicode__(self):
         return self.name
 
@@ -752,9 +755,19 @@ Bug #6180, #6203 -- dates with limits and/or counts
 >>> Item.objects.dates('created', 'day')[0]
 datetime.datetime(2007, 12, 19, 0, 0)
 
-Bug #7087 -- dates with extra select columns
+Bug #7087/#12242 -- dates with extra select columns
 >>> Item.objects.dates('created', 'day').extra(select={'a': 1})
 [datetime.datetime(2007, 12, 19, 0, 0), datetime.datetime(2007, 12, 20, 0, 0)]
+
+>>> Item.objects.extra(select={'a': 1}).dates('created', 'day')
+[datetime.datetime(2007, 12, 19, 0, 0), datetime.datetime(2007, 12, 20, 0, 0)]
+
+>>> name="one"
+>>> Item.objects.dates('created', 'day').extra(where=['name=%s'], params=[name])
+[datetime.datetime(2007, 12, 19, 0, 0)]
+
+>>> Item.objects.extra(where=['name=%s'], params=[name]).dates('created', 'day')
+[datetime.datetime(2007, 12, 19, 0, 0)]
 
 Bug #7155 -- nullable dates
 >>> Item.objects.dates('modified', 'day')
@@ -1143,6 +1156,36 @@ True
 >>> r.save()
 >>> Ranking.objects.all()
 [<Ranking: 3: a1>, <Ranking: 2: a2>, <Ranking: 1: a3>]
+
+# Regression test for #10742:
+# Queries used in an __in clause don't execute subqueries
+
+>>> subq = Author.objects.filter(num__lt=3000)
+>>> qs = Author.objects.filter(pk__in=subq)
+>>> list(qs)
+[<Author: a1>, <Author: a2>]
+
+# The subquery result cache should not be populated
+>>> subq._result_cache is None
+True
+
+>>> subq = Author.objects.filter(num__lt=3000)
+>>> qs = Author.objects.exclude(pk__in=subq)
+>>> list(qs)
+[<Author: a3>, <Author: a4>]
+
+# The subquery result cache should not be populated
+>>> subq._result_cache is None
+True
+
+>>> subq = Author.objects.filter(num__lt=3000)
+>>> list(Author.objects.filter(Q(pk__in=subq) & Q(name='a1')))
+[<Author: a1>]
+
+# The subquery result cache should not be populated
+>>> subq._result_cache is None
+True
+
 """}
 
 # In Python 2.3 and the Python 2.6 beta releases, exceptions raised in __len__

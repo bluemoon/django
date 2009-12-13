@@ -220,7 +220,7 @@ bytestrings (which shouldn't be too difficult) is the recommended solution.
 Should you decide to use ``utf8_bin`` collation for some of your tables with
 MySQLdb 1.2.1p2, you should still use ``utf8_collation_ci_swedish`` (the
 default) collation for the :class:`django.contrib.sessions.models.Session`
-table (usually called ``django_session`` and the table
+table (usually called ``django_session``) and the
 :class:`django.contrib.admin.models.LogEntry` table (usually called
 ``django_admin_log``). Those are the two standard tables that use
 :class:`~django.db.model.TextField` internally.
@@ -251,7 +251,7 @@ Here's a sample configuration which uses a MySQL option file::
     DATABASE_OPTIONS = {
         'read_default_file': '/path/to/my.cnf',
     }
-    
+
     # my.cnf
     [client]
     database = DATABASE_NAME
@@ -445,10 +445,10 @@ If you're getting this error, you can solve it by:
     * Switching to another database backend. At a certain point SQLite becomes
       too "lite" for real-world applications, and these sorts of concurrency
       errors indicate you've reached that point.
-      
-    * Rewriting your code to reduce concurrency and ensure that database 
+
+    * Rewriting your code to reduce concurrency and ensure that database
       transactions are short-lived.
-      
+
     * Increase the default timeout value by setting the ``timeout`` database
       option option::
 
@@ -457,7 +457,7 @@ If you're getting this error, you can solve it by:
              "timeout": 20,
               # ...
           }
-      
+
       This will simply make SQLite wait a bit longer before throwing "database
       is locked" errors; it won't really do anything to solve them.
 
@@ -476,6 +476,10 @@ version of the driver should **not** be used with Django;
 ``cx_Oracle`` 5.0.1 resolved this issue, so if you'd like to use a
 more recent ``cx_Oracle``, use version 5.0.1.
 
+``cx_Oracle`` 5.0.1 or greater can optionally be compiled with the
+``WITH_UNICODE`` environment variable.  This is recommended but not
+required.
+
 .. _`Oracle Database Server`: http://www.oracle.com/
 .. _`cx_Oracle`: http://cx-oracle.sourceforge.net/
 
@@ -493,6 +497,8 @@ To run Django's test suite, the user needs these *additional* privileges:
     * DROP USER
     * CREATE TABLESPACE
     * DROP TABLESPACE
+    * CONNECT WITH ADMIN OPTION
+    * RESOURCE WITH ADMIN OPTION
 
 Connecting to the database
 --------------------------
@@ -599,3 +605,28 @@ some limitations on the usage of such LOB columns in general:
     Oracle. A workaround to this is to keep ``TextField`` columns out of any
     models that you foresee performing ``distinct()`` queries on, and to
     include the ``TextField`` in a related model instead.
+
+.. _third-party-notes:
+
+Using a 3rd-party database backend
+==================================
+
+In addition to the officially supported databases, there are backends provided
+by 3rd parties that allow you to use other databases with Django:
+
+* `Sybase SQL Anywhere`_
+* `IBM DB2`_
+* `Microsoft SQL Server 2005`_
+* Firebird_
+* ODBC_
+
+The Django versions and ORM features supported by these unofficial backends
+vary considerably. Queries regarding the specific capabilities of these
+unofficial backends, along with any support queries, should be directed to
+the support channels provided by each 3rd party project.
+
+.. _Sybase SQL Anywhere: http://code.google.com/p/sqlany-django/
+.. _IBM DB2: http://code.google.com/p/ibm-db/
+.. _Microsoft SQL Server 2005: http://code.google.com/p/django-mssql/
+.. _Firebird: http://code.google.com/p/django-firebird/
+.. _ODBC: http://code.google.com/p/django-pyodbc/

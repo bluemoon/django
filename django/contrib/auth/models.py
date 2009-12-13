@@ -121,7 +121,8 @@ class UserManager(models.Manager):
         return ''.join([choice(allowed_chars) for i in range(length)])
 
 class User(models.Model):
-    """Users within the Django authentication system are represented by this model.
+    """
+    Users within the Django authentication system are represented by this model.
 
     Username and password are required. Other fields are optional.
     """
@@ -151,11 +152,16 @@ class User(models.Model):
         return "/users/%s/" % urllib.quote(smart_str(self.username))
 
     def is_anonymous(self):
-        "Always returns False. This is a way of comparing User objects to anonymous users."
+        """
+        Always returns False. This is a way of comparing User objects to
+        anonymous users.
+        """
         return False
 
     def is_authenticated(self):
-        """Always return True. This is a way to tell if the user has been authenticated in templates.
+        """
+        Always return True. This is a way to tell if the user has been
+        authenticated in templates.
         """
         return True
 
@@ -194,30 +200,41 @@ class User(models.Model):
     def has_usable_password(self):
         return self.password != UNUSABLE_PASSWORD
 
-    def get_group_permissions(self):
+    def get_group_permissions(self, obj=None):
         """
         Returns a list of permission strings that this user has through
         his/her groups. This method queries all available auth backends.
+        If an object is passed in, only permissions matching this object
+        are returned.
         """
         permissions = set()
         for backend in auth.get_backends():
             if hasattr(backend, "get_group_permissions"):
-                permissions.update(backend.get_group_permissions(self))
+                if obj is not None and backend.supports_object_permissions:
+                    group_permissions = backend.get_group_permissions(self, obj)
+                else:
+                    group_permissions = backend.get_group_permissions(self)
+                permissions.update(group_permissions)
         return permissions
 
-    def get_all_permissions(self):
+    def get_all_permissions(self, obj=None):
         permissions = set()
         for backend in auth.get_backends():
             if hasattr(backend, "get_all_permissions"):
-                permissions.update(backend.get_all_permissions(self))
+                if obj is not None and backend.supports_object_permissions:
+                    all_permissions = backend.get_all_permissions(self, obj)
+                else:
+                    all_permissions = backend.get_all_permissions(self)
+                permissions.update(all_permissions)
         return permissions
 
-    def has_perm(self, perm):
+    def has_perm(self, perm, obj=None):
         """
         Returns True if the user has the specified permission. This method
         queries all available auth backends, but returns immediately if any
         backend returns True. Thus, a user who has permission from a single
-        auth backend is assumed to have permission in general.
+        auth backend is assumed to have permission in general. If an object
+        is provided, permissions for this specific object are checked.
         """
         # Inactive users have no permissions.
         if not self.is_active:
@@ -230,14 +247,22 @@ class User(models.Model):
         # Otherwise we need to check the backends.
         for backend in auth.get_backends():
             if hasattr(backend, "has_perm"):
-                if backend.has_perm(self, perm):
-                    return True
+                if obj is not None and backend.supports_object_permissions:
+                    if backend.has_perm(self, perm, obj):
+                        return True
+                else:
+                    if backend.has_perm(self, perm):
+                        return True
         return False
 
-    def has_perms(self, perm_list):
-        """Returns True if the user has each of the specified permissions."""
+    def has_perms(self, perm_list, obj=None):
+        """
+        Returns True if the user has each of the specified permissions.
+        If object is passed, it checks if the user has all required perms
+        for this object.
+        """
         for perm in perm_list:
-            if not self.has_perm(perm):
+            if not self.has_perm(perm, obj):
                 return False
         return True
 
@@ -288,6 +313,14 @@ class User(models.Model):
                 raise SiteProfileNotAvailable
         return self._profile_cache
 
+    def _get_message_set(self):
+        import warnings
+        warnings.warn('The user messaging API is deprecated. Please update'
+                      ' your code to use the new messages framework.',
+                      category=PendingDeprecationWarning)
+        return self._message_set
+    message_set = property(_get_message_set)
+
 class Message(models.Model):
     """
     The message system is a lightweight way to queue messages for given
@@ -297,7 +330,7 @@ class Message(models.Model):
     actions. For example, "The poll Foo was created successfully." is a
     message.
     """
-    user = models.ForeignKey(User)
+    user = models.ForeignKey(User, related_name='_message_set')
     message = models.TextField(_('message'))
 
     def __unicode__(self):
@@ -350,10 +383,10 @@ class AnonymousUser(object):
         return self._user_permissions
     user_permissions = property(_get_user_permissions)
 
-    def has_perm(self, perm):
+    def has_perm(self, perm, obj=None):
         return False
 
-    def has_perms(self, perm_list):
+    def has_perms(self, perm_list, obj=None):
         return False
 
     def has_module_perms(self, module):

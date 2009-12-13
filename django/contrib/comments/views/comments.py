@@ -10,6 +10,7 @@ from django.utils.html import escape
 from django.views.decorators.http import require_POST
 from django.contrib import comments
 from django.contrib.comments import signals
+from django.views.decorators.csrf import csrf_protect
 
 class CommentPostBadRequest(http.HttpResponseBadRequest):
     """
@@ -22,6 +23,8 @@ class CommentPostBadRequest(http.HttpResponseBadRequest):
         if settings.DEBUG:
             self.content = render_to_string("comments/400-debug.html", {"why": why})
 
+@csrf_protect
+@require_POST
 def post_comment(request, next=None):
     """
     Post a comment.
@@ -36,6 +39,9 @@ def post_comment(request, next=None):
             data["name"] = request.user.get_full_name() or request.user.username
         if not data.get('email', ''):
             data["email"] = request.user.email
+
+    # Check to see if the POST data overrides the view's next argument.
+    next = data.get("next", next)
 
     # Look up the object we're trying to comment about
     ctype = data.get("content_type")
@@ -112,8 +118,6 @@ def post_comment(request, next=None):
     )
 
     return next_redirect(data, next, comment_done, c=comment._get_pk_val())
-
-post_comment = require_POST(post_comment)
 
 comment_done = confirmation_view(
     template = "comments/posted.html",

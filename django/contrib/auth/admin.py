@@ -3,6 +3,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.forms import UserCreationForm, UserChangeForm, AdminPasswordChangeForm
 from django.contrib.auth.models import User, Group
+from django.contrib import messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseRedirect, Http404
 from django.shortcuts import render_to_response, get_object_or_404
@@ -67,12 +68,13 @@ class UserAdmin(admin.ModelAdmin):
                 msg = _('The %(name)s "%(obj)s" was added successfully.') % {'name': 'user', 'obj': new_user}
                 self.log_addition(request, new_user)
                 if "_addanother" in request.POST:
-                    request.user.message_set.create(message=msg)
+                    messages.success(request, msg)
                     return HttpResponseRedirect(request.path)
                 elif '_popup' in request.REQUEST:
                     return self.response_add(request, new_user)
                 else:
-                    request.user.message_set.create(message=msg + ' ' + ugettext("You may edit it again below."))
+                    messages.success(request, msg + ' ' +
+                                     ugettext("You may edit it again below."))
                     return HttpResponseRedirect('../%s/' % new_user.id)
         else:
             form = self.add_form()
@@ -96,7 +98,7 @@ class UserAdmin(admin.ModelAdmin):
         }, context_instance=template.RequestContext(request))
 
     def user_change_password(self, request, id):
-        if not request.user.has_perm('auth.change_user'):
+        if not self.has_change_permission(request):
             raise PermissionDenied
         user = get_object_or_404(self.model, pk=id)
         if request.method == 'POST':
@@ -104,7 +106,7 @@ class UserAdmin(admin.ModelAdmin):
             if form.is_valid():
                 new_user = form.save()
                 msg = ugettext('Password changed successfully.')
-                request.user.message_set.create(message=msg)
+                messages.success(request, msg)
                 return HttpResponseRedirect('..')
         else:
             form = self.change_password_form(user)

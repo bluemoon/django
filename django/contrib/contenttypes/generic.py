@@ -105,8 +105,6 @@ class GenericRelation(RelatedField, Field):
                             limit_choices_to=kwargs.pop('limit_choices_to', None),
                             symmetrical=kwargs.pop('symmetrical', True))
 
-        # By its very nature, a GenericRelation doesn't create a table.
-        self.creates_table = False
 
         # Override content-type/object-id field names on the related class
         self.object_id_field_name = kwargs.pop("object_id_field", "object_id")
@@ -317,12 +315,15 @@ class BaseGenericInlineFormSet(BaseModelFormSet):
     def get_queryset(self):
         # Avoid a circular import.
         from django.contrib.contenttypes.models import ContentType
-        if self.instance is None:
+        if self.instance is None or self.instance.pk is None:
             return self.model._default_manager.none()
-        return self.model._default_manager.filter(**{
+        qs = self.model._default_manager.filter(**{
             self.ct_field.name: ContentType.objects.get_for_model(self.instance),
             self.ct_fk_field.name: self.instance.pk,
         })
+        if not qs.ordered:
+            qs = qs.order_by(self.model._meta.pk.name)
+        return qs
 
     def save_new(self, form, commit=True):
         # Avoid a circular import.
@@ -389,6 +390,8 @@ class GenericInlineModelAdmin(InlineModelAdmin):
             "can_delete": True,
             "can_order": False,
             "fields": fields,
+            "max_num": self.max_num,
+            "exclude": self.exclude
         }
         return generic_inlineformset_factory(self.model, **defaults)
 

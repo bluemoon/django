@@ -139,8 +139,8 @@ In the case of model tests, note that the test runner takes care of creating
 its own test database. That is, any test that accesses a database -- by
 creating and saving model instances, for example -- will not affect your
 production database. However, the database is not refreshed between doctests,
-so if your doctest requires a certain state you should consider flushin the 
-database or loading a fixture. (See the section on fixtures, below, for more 
+so if your doctest requires a certain state you should consider flushing the
+database or loading a fixture. (See the section on fixtures, below, for more
 on this.) Note that to use this feature, the database user Django is connecting
 as must have ``CREATE DATABASE`` rights.
 
@@ -479,7 +479,7 @@ arguments at time of construction:
     Once you have a ``Client`` instance, you can call any of the following
     methods:
 
-    .. method:: Client.get(path, data={}, follow=False)
+    .. method:: Client.get(path, data={}, follow=False, **extra)
 
 
         Makes a GET request on the provided ``path`` and returns a ``Response``
@@ -495,6 +495,17 @@ arguments at time of construction:
 
             /customers/details/?name=fred&age=7
 
+        The ``extra`` keyword arguments parameter can be used to specify
+        headers to be sent in the request. For example::
+
+            >>> c = Client()
+            >>> c.get('/customers/details/', {'name': 'fred', 'age': 7},
+            ...       HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+
+        ...will send the HTTP header ``HTTP_X_REQUESTED_WITH`` to the
+        details	view, which is a good way to test code paths that use the
+        :meth:`django.http.HttpRequest.is_ajax()` method.
+
         .. versionadded:: 1.1
 
         If you already have the GET arguments in URL-encoded form, you can
@@ -504,7 +515,7 @@ arguments at time of construction:
         >>> c = Client()
         >>> c.get('/customers/details/?name=fred&age=7')
 
-        If you provide URL both an encoded GET data and a data argument,
+        If you provide a URL with both an encoded GET data and a data argument,
         the data argument will take precedence.
 
         If you set ``follow`` to ``True`` the client will follow any redirects
@@ -514,11 +525,11 @@ arguments at time of construction:
         If you had an url ``/redirect_me/`` that redirected to ``/next/``, that
         redirected to ``/final/``, this is what you'd see::
 
-            >>> response = c.get('/redirect_me/')
+            >>> response = c.get('/redirect_me/', follow=True)
             >>> response.redirect_chain
             [(u'http://testserver/next/', 302), (u'http://testserver/final/', 302)]
 
-    .. method:: Client.post(path, data={}, content_type=MULTIPART_CONTENT, follow=False)
+    .. method:: Client.post(path, data={}, content_type=MULTIPART_CONTENT, follow=False, **extra)
 
         Makes a POST request on the provided ``path`` and returns a
         ``Response`` object, which is documented below.
@@ -569,6 +580,8 @@ arguments at time of construction:
         Note that you should manually close the file after it has been provided
         to ``post()``.
 
+        The ``extra`` argument acts the same as for :meth:`Client.get`.
+
         .. versionchanged:: 1.1
 
         If the URL you request with a POST contains encoded parameters, these
@@ -585,7 +598,7 @@ arguments at time of construction:
         and a ``redirect_chain`` attribute will be set in the response object
         containing tuples of the intermediate urls and status codes.
 
-    .. method:: Client.head(path, data={}, follow=False)
+    .. method:: Client.head(path, data={}, follow=False, **extra)
 
         .. versionadded:: 1.1
 
@@ -597,7 +610,7 @@ arguments at time of construction:
         and a ``redirect_chain`` attribute will be set in the response object
         containing tuples of the intermediate urls and status codes.
 
-    .. method:: Client.options(path, data={}, follow=False)
+    .. method:: Client.options(path, data={}, follow=False, **extra)
 
         .. versionadded:: 1.1
 
@@ -608,11 +621,13 @@ arguments at time of construction:
         and a ``redirect_chain`` attribute will be set in the response object
         containing tuples of the intermediate urls and status codes.
 
-    .. method:: Client.put(path, data={}, content_type=MULTIPART_CONTENT, follow=False)
+        The ``extra`` argument acts the same as for :meth:`Client.get`.
+
+    .. method:: Client.put(path, data={}, content_type=MULTIPART_CONTENT, follow=False, **extra)
 
         .. versionadded:: 1.1
 
-        Makes an PUT request on the provided ``path`` and returns a
+        Makes a PUT request on the provided ``path`` and returns a
         ``Response`` object. Useful for testing RESTful interfaces. Acts just
         like :meth:`Client.post` except with the PUT request method.
 
@@ -620,7 +635,7 @@ arguments at time of construction:
         and a ``redirect_chain`` attribute will be set in the response object
         containing tuples of the intermediate urls and status codes.
 
-    .. method:: Client.delete(path, follow=False)
+    .. method:: Client.delete(path, follow=False, **extra)
 
         .. versionadded:: 1.1
 
@@ -630,6 +645,8 @@ arguments at time of construction:
         If you set ``follow`` to ``True`` the client will follow any redirects
         and a ``redirect_chain`` attribute will be set in the response object
         containing tuples of the intermediate urls and status codes.
+
+        The ``extra`` argument acts the same as for :meth:`Client.get`.
 
     .. method:: Client.login(**credentials)
 
@@ -669,7 +686,13 @@ arguments at time of construction:
         user accounts that are valid on your production site will not work
         under test conditions. You'll need to create users as part of the test
         suite -- either manually (using the Django model API) or with a test
-        fixture.
+        fixture. Remember that if you want your test user to have a password,
+        you can't set the user's password by setting the password attribute
+        directly -- you must use the
+        :meth:`~django.contrib.auth.models.User.set_password()` function to
+        store a correctly hashed password. Alternatively, you can use the
+        :meth:`~django.contrib.auth.models.UserManager.create_user` helper
+        method to create a new user with a correctly hashed password.
 
     .. method:: Client.logout()
 
@@ -752,7 +775,7 @@ Exceptions
 ~~~~~~~~~~
 
 If you point the test client at a view that raises an exception, that exception
-will be visible in the test case. You can then use a standard ``try...catch``
+will be visible in the test case. You can then use a standard ``try...except``
 block or ``unittest.TestCase.assertRaises()`` to test for exceptions.
 
 The only exceptions that are not visible to the test client are ``Http404``,
@@ -957,19 +980,21 @@ subclass::
 
         def setUp(self):
             # Test definitions as before.
+            call_setup_methods()
 
         def testFluffyAnimals(self):
             # A test that uses the fixtures.
+            call_some_test_code()
 
 Here's specifically what will happen:
 
     * At the start of each test case, before ``setUp()`` is run, Django will
       flush the database, returning the database to the state it was in
-      directly after ``syncdb`` was called.
+      directly after :djadmin:`syncdb` was called.
 
     * Then, all the named fixtures are installed. In this example, Django will
       install any JSON fixture named ``mammals``, followed by any fixture named
-      ``birds``. See the :djadmin:`loaddata documentation<loaddata>` for more
+      ``birds``. See the :djadmin:`loaddata` documentation for more
       details on defining and installing fixtures.
 
 This flush/load procedure is repeated for each test in the test case, so you
@@ -1005,6 +1030,7 @@ For example::
 
         def testIndexPageView(self):
             # Here you'd test your view using ``Client``.
+            call_some_test_code()
 
 This test case will use the contents of ``myapp.test_urls`` as the
 URLconf for the duration of the test case.
@@ -1042,7 +1068,7 @@ applications:
     Asserts that a ``Response`` instance produced the given ``status_code`` and
     that ``text`` does not appears in the content of the response.
 
-.. method:: assertFormError(response, form, field, errors)
+.. method:: TestCase.assertFormError(response, form, field, errors)
 
     Asserts that a field on a form raises the provided list of errors when
     rendered on the form.
@@ -1057,19 +1083,19 @@ applications:
     ``errors`` is an error string, or a list of error strings, that are
     expected as a result of form validation.
 
-.. method:: assertTemplateUsed(response, template_name)
+.. method:: TestCase.assertTemplateUsed(response, template_name)
 
     Asserts that the template with the given name was used in rendering the
     response.
 
     The name is a string such as ``'admin/index.html'``.
 
-.. method:: assertTemplateNotUsed(response, template_name)
+.. method:: TestCase.assertTemplateNotUsed(response, template_name)
 
     Asserts that the template with the given name was *not* used in rendering
     the response.
 
-.. method:: assertRedirects(response, expected_url, status_code=302, target_status_code=200)
+.. method:: TestCase.assertRedirects(response, expected_url, status_code=302, target_status_code=200)
 
     Asserts that the response return a ``status_code`` redirect status, it
     redirected to ``expected_url`` (including any GET data), and the final
@@ -1080,6 +1106,8 @@ applications:
     If your request used the ``follow`` argument, the ``expected_url`` and
     ``target_status_code`` will be the url and status code for the final
     point of the redirect chain.
+
+.. _topics-testing-email:
 
 E-mail services
 ---------------
@@ -1094,7 +1122,7 @@ test every aspect of sending e-mail -- from the number of messages sent to the
 contents of each message -- without actually sending the messages.
 
 The test runner accomplishes this by transparently replacing the normal
-:class:`~django.core.mail.SMTPConnection` class with a different version.
+email backend with a testing backend.
 (Don't worry -- this has no effect on any other e-mail senders outside of
 Django, such as your machine's mail server, if you're running one.)
 
@@ -1104,15 +1132,9 @@ Django, such as your machine's mail server, if you're running one.)
 
 During test running, each outgoing e-mail is saved in
 ``django.core.mail.outbox``. This is a simple list of all
-:class:`<~django.core.mail.EmailMessage>` instances that have been sent.
-It does not exist under normal execution conditions, i.e., when you're not
-running unit tests. The outbox is created during test setup, along with the
-dummy :class:`<~django.core.mail.SMTPConnection>`. When the test framework is
-torn down, the standard :class:`<~django.core.mail.SMTPConnection>` class is
-restored, and the test outbox is destroyed.
-
+:class:`~django.core.mail.EmailMessage` instances that have been sent.
 The ``outbox`` attribute is a special attribute that is created *only* when
-the tests are run. It doesn't normally exist as part of the
+the ``locmem`` e-mail backend is used. It doesn't normally exist as part of the
 :mod:`django.core.mail` module and you can't import it directly. The code
 below shows how to access this attribute correctly.
 

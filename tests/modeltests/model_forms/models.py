@@ -112,10 +112,13 @@ try:
             return '%s/%s' % (path, filename)
 
         description = models.CharField(max_length=20)
-        image = models.ImageField(storage=temp_storage, upload_to=custom_upload_path,
-                                  width_field='width', height_field='height')
+
+        # Deliberately put the image field *after* the width/height fields to
+        # trigger the bug in #10404 with width/height not getting assigned.
         width = models.IntegerField(editable=False)
         height = models.IntegerField(editable=False)
+        image = models.ImageField(storage=temp_storage, upload_to=custom_upload_path,
+                                  width_field='width', height_field='height')
         path = models.CharField(max_length=16, blank=True, default='')
 
         def __unicode__(self):
@@ -188,6 +191,15 @@ class ExplicitPK(models.Model):
 
     def __unicode__(self):
         return self.key
+
+class Post(models.Model):
+    title = models.CharField(max_length=50, unique_for_date='posted', blank=True)
+    slug = models.CharField(max_length=50, unique_for_year='posted', blank=True)
+    subtitle = models.CharField(max_length=50, unique_for_month='posted', blank=True)
+    posted = models.DateField()
+
+    def __unicode__(self):
+        return self.name
 
 __test__ = {'API_TESTS': """
 >>> from django import forms
@@ -601,6 +613,30 @@ Add some categories and test the many-to-many form output.
 <li>Categories: <select multiple="multiple" name="categories">
 <option value="1" selected="selected">Entertainment</option>
 <option value="2">It&#39;s a test</option>
+<option value="3">Third test</option>
+</select>  Hold down "Control", or "Command" on a Mac, to select more than one.</li>
+
+Initial values can be provided for model forms
+>>> f = TestArticleForm(auto_id=False, initial={'headline': 'Your headline here', 'categories': ['1','2']})
+>>> print f.as_ul()
+<li>Headline: <input type="text" name="headline" value="Your headline here" maxlength="50" /></li>
+<li>Slug: <input type="text" name="slug" maxlength="50" /></li>
+<li>Pub date: <input type="text" name="pub_date" /></li>
+<li>Writer: <select name="writer">
+<option value="" selected="selected">---------</option>
+<option value="1">Mike Royko</option>
+<option value="2">Bob Woodward</option>
+</select></li>
+<li>Article: <textarea rows="10" cols="40" name="article"></textarea></li>
+<li>Status: <select name="status">
+<option value="" selected="selected">---------</option>
+<option value="1">Draft</option>
+<option value="2">Pending</option>
+<option value="3">Live</option>
+</select></li>
+<li>Categories: <select multiple="multiple" name="categories">
+<option value="1" selected="selected">Entertainment</option>
+<option value="2" selected="selected">It&#39;s a test</option>
 <option value="3">Third test</option>
 </select>  Hold down "Control", or "Command" on a Mac, to select more than one.</li>
 
@@ -1139,8 +1175,9 @@ True
 >>> instance.height
 16
 
-# Delete the current file since this is not done by Django.
->>> instance.image.delete()
+# Delete the current file since this is not done by Django, but don't save
+# because the dimension fields are not null=True.
+>>> instance.image.delete(save=False)
 
 >>> f = ImageFileForm(data={'description': u'An image'}, files={'image': SimpleUploadedFile('test.png', image_data)})
 >>> f.is_valid()
@@ -1171,9 +1208,9 @@ True
 >>> instance.width
 16
 
-# Delete the current image since this is not done by Django.
-
->>> instance.image.delete()
+# Delete the current file since this is not done by Django, but don't save
+# because the dimension fields are not null=True.
+>>> instance.image.delete(save=False)
 
 # Override the file by uploading a new one.
 
@@ -1188,8 +1225,9 @@ True
 >>> instance.width
 48
 
-# Delete the current file since this is not done by Django.
->>> instance.image.delete()
+# Delete the current file since this is not done by Django, but don't save
+# because the dimension fields are not null=True.
+>>> instance.image.delete(save=False)
 >>> instance.delete()
 
 >>> f = ImageFileForm(data={'description': u'Changed it'}, files={'image': SimpleUploadedFile('test2.png', image_data2)})
@@ -1203,8 +1241,9 @@ True
 >>> instance.width
 48
 
-# Delete the current file since this is not done by Django.
->>> instance.image.delete()
+# Delete the current file since this is not done by Django, but don't save
+# because the dimension fields are not null=True.
+>>> instance.image.delete(save=False)
 >>> instance.delete()
 
 # Test the non-required ImageField
@@ -1471,6 +1510,38 @@ ValidationError: [u'Select a valid choice. z is not one of the available choices
 >>> print CategoryForm()
 <tr><th><label for="id_description">Description:</label></th><td><input type="text" name="description" id="id_description" /></td></tr>
 <tr><th><label for="id_url">The URL:</label></th><td><input id="id_url" type="text" name="url" maxlength="40" /></td></tr>
+
+### Validation on unique_for_date
+
+>>> p = Post.objects.create(title="Django 1.0 is released", slug="Django 1.0", subtitle="Finally", posted=datetime.date(2008, 9, 3))
+>>> class PostForm(ModelForm):
+...     class Meta:
+...         model = Post
+
+>>> f = PostForm({'title': "Django 1.0 is released", 'posted': '2008-09-03'})
+>>> f.is_valid()
+False
+>>> f.errors
+{'title': [u'Title must be unique for Posted date.']}
+>>> f = PostForm({'title': "Work on Django 1.1 begins", 'posted': '2008-09-03'})
+>>> f.is_valid()
+True
+>>> f = PostForm({'title': "Django 1.0 is released", 'posted': '2008-09-04'})
+>>> f.is_valid()
+True
+>>> f = PostForm({'slug': "Django 1.0", 'posted': '2008-01-01'})
+>>> f.is_valid()
+False
+>>> f.errors
+{'slug': [u'Slug must be unique for Posted year.']}
+>>> f = PostForm({'subtitle': "Finally", 'posted': '2008-09-30'})
+>>> f.is_valid()
+False
+>>> f.errors
+{'subtitle': [u'Subtitle must be unique for Posted month.']}
+>>> f = PostForm({'subtitle': "Finally", "title": "Django 1.0 is released", "slug": "Django 1.0", 'posted': '2008-09-03'}, instance=p)
+>>> f.is_valid()
+True
 
 # Clean up
 >>> import shutil

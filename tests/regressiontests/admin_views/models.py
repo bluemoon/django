@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+import tempfile
+import os
+from django.core.files.storage import FileSystemStorage
 from django.db import models
 from django.contrib import admin
 from django.core.mail import EmailMessage
@@ -171,6 +174,7 @@ class PersonAdmin(admin.ModelAdmin):
     list_filter = ('gender',)
     search_fields = (u'name',)
     ordering = ["id"]
+    save_as = True
 
 class Persona(models.Model):
     """
@@ -266,6 +270,16 @@ class PodcastAdmin(admin.ModelAdmin):
 
     ordering = ('name',)
 
+class Vodcast(Media):
+    media = models.OneToOneField(Media, primary_key=True, parent_link=True)
+    released = models.BooleanField(default=False)
+
+class VodcastAdmin(admin.ModelAdmin):
+    list_display = ('name', 'released')
+    list_editable = ('released',)
+
+    ordering = ('name',)
+
 class Parent(models.Model):
     name = models.CharField(max_length=128)
 
@@ -291,6 +305,121 @@ class EmptyModelAdmin(admin.ModelAdmin):
 class OldSubscriberAdmin(admin.ModelAdmin):
     actions = None
 
+temp_storage = FileSystemStorage(tempfile.mkdtemp())
+UPLOAD_TO = os.path.join(temp_storage.location, 'test_upload')
+
+class Gallery(models.Model):
+    name = models.CharField(max_length=100)
+
+class Picture(models.Model):
+    name = models.CharField(max_length=100)
+    image = models.FileField(storage=temp_storage, upload_to='test_upload')
+    gallery = models.ForeignKey(Gallery, related_name="pictures")
+
+class PictureInline(admin.TabularInline):
+    model = Picture
+    extra = 1
+
+class GalleryAdmin(admin.ModelAdmin):
+    inlines = [PictureInline]
+
+class PictureAdmin(admin.ModelAdmin):
+    pass
+
+class Language(models.Model):
+    iso = models.CharField(max_length=5, primary_key=True)
+    name = models.CharField(max_length=50)
+    english_name = models.CharField(max_length=50)
+    shortlist = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ('iso',)
+
+class LanguageAdmin(admin.ModelAdmin):
+    list_display = ['iso', 'shortlist', 'english_name', 'name']
+    list_editable = ['shortlist']
+
+# a base class for Recommender and Recommendation
+class Title(models.Model):
+    pass
+
+class TitleTranslation(models.Model):
+    title = models.ForeignKey(Title)
+    text = models.CharField(max_length=100)
+
+class Recommender(Title):
+    pass
+
+class Recommendation(Title):
+    recommender = models.ForeignKey(Recommender)
+
+class RecommendationAdmin(admin.ModelAdmin):
+    search_fields = ('titletranslation__text', 'recommender__titletranslation__text',)
+
+class Collector(models.Model):
+    name = models.CharField(max_length=100)
+
+class Widget(models.Model):
+    owner = models.ForeignKey(Collector)
+    name = models.CharField(max_length=100)
+
+class DooHickey(models.Model):
+    code = models.CharField(max_length=10, primary_key=True)
+    owner = models.ForeignKey(Collector)
+    name = models.CharField(max_length=100)
+
+class Grommet(models.Model):
+    code = models.AutoField(primary_key=True)
+    owner = models.ForeignKey(Collector)
+    name = models.CharField(max_length=100)
+
+class Whatsit(models.Model):
+    index = models.IntegerField(primary_key=True)
+    owner = models.ForeignKey(Collector)
+    name = models.CharField(max_length=100)
+
+class Doodad(models.Model):
+    name = models.CharField(max_length=100)
+
+class FancyDoodad(Doodad):
+    owner = models.ForeignKey(Collector)
+    expensive = models.BooleanField(default=True)
+
+class WidgetInline(admin.StackedInline):
+    model = Widget
+
+class DooHickeyInline(admin.StackedInline):
+    model = DooHickey
+
+class GrommetInline(admin.StackedInline):
+    model = Grommet
+
+class WhatsitInline(admin.StackedInline):
+    model = Whatsit
+
+class FancyDoodadInline(admin.StackedInline):
+    model = FancyDoodad
+
+class Category(models.Model):
+    collector = models.ForeignKey(Collector)
+    order = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ('order',)
+
+    def __unicode__(self):
+        return u'%s:o%s' % (self.id, self.order)
+
+class CategoryAdmin(admin.ModelAdmin):
+    list_display = ('id', 'collector', 'order')
+    list_editable = ('order',)
+
+class CategoryInline(admin.StackedInline):
+    model = Category
+
+class CollectorAdmin(admin.ModelAdmin):
+    inlines = [WidgetInline, DooHickeyInline, GrommetInline, WhatsitInline, FancyDoodadInline, CategoryInline]
+
 admin.site.register(Article, ArticleAdmin)
 admin.site.register(CustomArticle, CustomArticleAdmin)
 admin.site.register(Section, save_as=True, inlines=[ArticleInline])
@@ -303,9 +432,17 @@ admin.site.register(Subscriber, SubscriberAdmin)
 admin.site.register(ExternalSubscriber, ExternalSubscriberAdmin)
 admin.site.register(OldSubscriber, OldSubscriberAdmin)
 admin.site.register(Podcast, PodcastAdmin)
+admin.site.register(Vodcast, VodcastAdmin)
 admin.site.register(Parent, ParentAdmin)
 admin.site.register(EmptyModel, EmptyModelAdmin)
 admin.site.register(Fabric, FabricAdmin)
+admin.site.register(Gallery, GalleryAdmin)
+admin.site.register(Picture, PictureAdmin)
+admin.site.register(Language, LanguageAdmin)
+admin.site.register(Recommendation, RecommendationAdmin)
+admin.site.register(Recommender)
+admin.site.register(Collector, CollectorAdmin)
+admin.site.register(Category, CategoryAdmin)
 
 # We intentionally register Promo and ChapterXtra1 but not Chapter nor ChapterXtra2.
 # That way we cover all four cases:

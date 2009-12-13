@@ -1,5 +1,4 @@
 import copy
-
 from django.db.models.query import QuerySet, EmptyQuerySet, insert_query
 from django.db.models import signals
 from django.db.models.fields import FieldDoesNotExist
@@ -57,7 +56,7 @@ class Manager(object):
         setattr(model, name, ManagerDescriptor(self))
         if not getattr(model, '_default_manager', None) or self.creation_counter < model._default_manager.creation_counter:
             model._default_manager = self
-        if model._meta.abstract or self._inherited:
+        if model._meta.abstract or (self._inherited and not self.model._meta.proxy):
             model._meta.abstract_managers.append((self.creation_counter, name,
                     self))
         else:
@@ -172,6 +171,9 @@ class Manager(object):
 
     def only(self, *args, **kwargs):
         return self.get_query_set().only(*args, **kwargs)
+
+    def exists(self, *args, **kwargs):
+        return self.get_query_set().exists(*args, **kwargs)
 
     def _insert(self, values, **kwargs):
         return insert_query(self.model, values, **kwargs)

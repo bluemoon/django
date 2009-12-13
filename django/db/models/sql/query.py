@@ -8,7 +8,6 @@ all about the internals of models in order to get the information it needs.
 """
 
 from copy import deepcopy
-
 from django.utils.tree import Node
 from django.utils.datastructures import SortedDict
 from django.utils.encoding import force_unicode
@@ -23,11 +22,6 @@ from django.db.models.sql.where import WhereNode, Constraint, EverythingNode, AN
 from django.core.exceptions import FieldError
 from datastructures import EmptyResultSet, Empty, MultiJoin
 from constants import *
-
-try:
-    set
-except NameError:
-    from sets import Set as set     # Python 2.3 fallback
 
 __all__ = ['Query', 'BaseQuery']
 
@@ -88,7 +82,10 @@ class BaseQuery(object):
 
         # These are for extensions. The contents are more or less appended
         # verbatim to the appropriate clause.
-        self.extra_select = SortedDict()  # Maps col_alias -> (col_sql, params).
+        self.extra = SortedDict()  # Maps col_alias -> (col_sql, params).
+        self.extra_select_mask = None
+        self._extra_select_cache = None
+
         self.extra_tables = ()
         self.extra_where = ()
         self.extra_params = ()
@@ -214,13 +211,21 @@ class BaseQuery(object):
         if self.aggregate_select_mask is None:
             obj.aggregate_select_mask = None
         else:
-            obj.aggregate_select_mask = self.aggregate_select_mask[:]
+            obj.aggregate_select_mask = self.aggregate_select_mask.copy()
         if self._aggregate_select_cache is None:
             obj._aggregate_select_cache = None
         else:
             obj._aggregate_select_cache = self._aggregate_select_cache.copy()
         obj.max_depth = self.max_depth
-        obj.extra_select = self.extra_select.copy()
+        obj.extra = self.extra.copy()
+        if self.extra_select_mask is None:
+            obj.extra_select_mask = None
+        else:
+            obj.extra_select_mask = self.extra_select_mask.copy()
+        if self._extra_select_cache is None:
+            obj._extra_select_cache = None
+        else:
+            obj._extra_select_cache = self._extra_select_cache.copy()
         obj.extra_tables = self.extra_tables
         obj.extra_where = self.extra_where
         obj.extra_params = self.extra_params
@@ -325,7 +330,7 @@ class BaseQuery(object):
             query = self
             self.select = []
             self.default_cols = False
-            self.extra_select = {}
+            self.extra = {}
             self.remove_inherited_models()
 
         query.clear_ordering(True)
@@ -372,6 +377,16 @@ class BaseQuery(object):
             number = min(number, self.high_mark - self.low_mark)
 
         return number
+
+    def has_results(self):
+        q = self.clone()
+        q.add_extra({'a': 1}, None, None, None, None, None)
+        q.add_fields(())
+        q.set_extra_mask(('a',))
+        q.set_aggregate_mask(())
+        q.clear_ordering()
+        q.set_limits(high=1)
+        return bool(q.execute_sql(SINGLE))
 
     def as_sql(self, with_limits=True, with_col_aliases=False):
         """
@@ -540,13 +555,20 @@ class BaseQuery(object):
             # It would be nice to be able to handle this, but the queries don't
             # really make sense (or return consistent value sets). Not worth
             # the extra complexity when you can write a real query instead.
-            if self.extra_select and rhs.extra_select:
+            if self.extra and rhs.extra:
                 raise ValueError("When merging querysets using 'or', you "
                         "cannot have extra(select=...) on both sides.")
             if self.extra_where and rhs.extra_where:
                 raise ValueError("When merging querysets using 'or', you "
                         "cannot have extra(where=...) on both sides.")
-        self.extra_select.update(rhs.extra_select)
+        self.extra.update(rhs.extra)
+        extra_select_mask = set()
+        if self.extra_select_mask is not None:
+            extra_select_mask.update(self.extra_select_mask)
+        if rhs.extra_select_mask is not None:
+            extra_select_mask.update(rhs.extra_select_mask)
+        if extra_select_mask:
+            self.set_extra_mask(extra_select_mask)
         self.extra_tables += rhs.extra_tables
         self.extra_where += rhs.extra_where
         self.extra_params += rhs.extra_params
@@ -617,10 +639,10 @@ class BaseQuery(object):
             # models.
             workset = {}
             for model, values in seen.iteritems():
-                for field, f_model in model._meta.get_fields_with_model():
+                for field in model._meta.local_fields:
                     if field in values:
                         continue
-                    add_to_dict(workset, f_model or model, field)
+                    add_to_dict(workset, model, field)
             for model, values in must_include.iteritems():
                 # If we haven't included a model in workset, we don't add the
                 # corresponding must_include fields for that model, since an
@@ -639,6 +661,12 @@ class BaseQuery(object):
                     # included any fields, we have to make sure it's mentioned
                     # so that only the "must include" fields are pulled in.
                     seen[model] = values
+            # Now ensure that every model in the inheritance chain is mentioned
+            # in the parent list. Again, it must be mentioned to ensure that
+            # only "must include" fields are pulled in.
+            for model in orig_opts.get_parent_list():
+                if model not in seen:
+                    seen[model] = set()
             for model, values in seen.iteritems():
                 callback(target, model, values)
 
@@ -671,7 +699,7 @@ class BaseQuery(object):
 
         If 'with_aliases' is true, any column names that are duplicated
         (without the table names) are given unique aliases. This is needed in
-        some cases to avoid ambiguitity with nested queries.
+        some cases to avoid ambiguity with nested queries.
         """
         qn = self.quote_name_unless_alias
         qn2 = self.connection.ops.quote_name
@@ -760,7 +788,9 @@ class BaseQuery(object):
         qn2 = self.connection.ops.quote_name
         aliases = set()
         only_load = self.deferred_to_columns()
-        proxied_model = opts.proxy and opts.proxy_for_model or 0
+        # Skip all proxy to the root proxied model
+        proxied_model = get_proxied_model(opts)
+
         if start_alias:
             seen = {None: start_alias}
         for field, model in opts.get_fields_with_model():
@@ -1283,7 +1313,10 @@ class BaseQuery(object):
         opts = self.model._meta
         root_alias = self.tables[0]
         seen = {None: root_alias}
-        proxied_model = opts.proxy and opts.proxy_for_model or 0
+
+        # Skip all proxy to the root proxied model
+        proxied_model = get_proxied_model(opts)
+
         for field, model in opts.get_fields_with_model():
             if model not in seen:
                 if model is proxied_model:
@@ -1358,6 +1391,13 @@ class BaseQuery(object):
                 alias = root_alias
                 alias_chain = []
                 for int_model in opts.get_base_chain(model):
+                    # Proxy model have elements in base chain
+                    # with no parents, assign the new options
+                    # object and skip to the next base in that
+                    # case
+                    if not int_opts.parents[int_model]:
+                        int_opts = int_model._meta
+                        continue
                     lhs_col = int_opts.parents[int_model].column
                     dedupe = lhs_col in opts.duplicate_targets
                     if dedupe:
@@ -1589,10 +1629,14 @@ class BaseQuery(object):
                             entry.negate()
                             self.where.add(entry, AND)
                             break
-                elif not (lookup_type == 'in' and not value) and field.null:
+                elif not (lookup_type == 'in'
+                            and not hasattr(value, 'as_sql')
+                            and not hasattr(value, '_as_sql')
+                            and not value) and field.null:
                     # Leaky abstraction artifact: We have to specifically
                     # exclude the "foo__in=[]" case from this handling, because
                     # it's short-circuited in the Where class.
+                    # We also need to handle the case where a subquery is provided
                     entry = self.where_class()
                     entry.add((Constraint(alias, col, None), 'isnull', True), AND)
                     entry.negate()
@@ -1702,7 +1746,9 @@ class BaseQuery(object):
                 raise MultiJoin(pos + 1)
             if model:
                 # The field lives on a base class of the current model.
-                proxied_model = opts.proxy and opts.proxy_for_model or 0
+                # Skip the chain of proxy to the concrete proxied model
+                proxied_model = get_proxied_model(opts)
+
                 for int_model in opts.get_base_chain(model):
                     if int_model is proxied_model:
                         opts = int_model._meta
@@ -2011,7 +2057,7 @@ class BaseQuery(object):
         except MultiJoin:
             raise FieldError("Invalid field name: '%s'" % name)
         except FieldError:
-            names = opts.get_all_field_names() + self.extra_select.keys() + self.aggregate_select.keys()
+            names = opts.get_all_field_names() + self.extra.keys() + self.aggregate_select.keys()
             names.sort()
             raise FieldError("Cannot resolve keyword %r into field. "
                     "Choices are: %s" % (name, ", ".join(names)))
@@ -2139,7 +2185,7 @@ class BaseQuery(object):
                     pos = entry.find("%s", pos + 2)
                 select_pairs[name] = (entry, entry_params)
             # This is order preserving, since self.extra_select is a SortedDict.
-            self.extra_select.update(select_pairs)
+            self.extra.update(select_pairs)
         if where:
             self.extra_where += tuple(where)
         if params:
@@ -2213,21 +2259,25 @@ class BaseQuery(object):
         """
         target[model] = set([f.name for f in fields])
 
-    def trim_extra_select(self, names):
-        """
-        Removes any aliases in the extra_select dictionary that aren't in
-        'names'.
-
-        This is needed if we are selecting certain values that don't incldue
-        all of the extra_select names.
-        """
-        for key in set(self.extra_select).difference(set(names)):
-            del self.extra_select[key]
-
     def set_aggregate_mask(self, names):
         "Set the mask of aggregates that will actually be returned by the SELECT"
-        self.aggregate_select_mask = names
+        if names is None:
+            self.aggregate_select_mask = None
+        else:
+            self.aggregate_select_mask = set(names)
         self._aggregate_select_cache = None
+
+    def set_extra_mask(self, names):
+        """
+        Set the mask of extra select items that will be returned by SELECT,
+        we don't actually remove them from the Query since they might be used
+        later
+        """
+        if names is None:
+            self.extra_select_mask = None
+        else:
+            self.extra_select_mask = set(names)
+        self._extra_select_cache = None
 
     def _aggregate_select(self):
         """The SortedDict of aggregate columns that are not masked, and should
@@ -2246,6 +2296,19 @@ class BaseQuery(object):
         else:
             return self.aggregates
     aggregate_select = property(_aggregate_select)
+
+    def _extra_select(self):
+        if self._extra_select_cache is not None:
+            return self._extra_select_cache
+        elif self.extra_select_mask is not None:
+            self._extra_select_cache = SortedDict([
+                (k,v) for k,v in self.extra.items()
+                if k in self.extra_select_mask
+            ])
+            return self._extra_select_cache
+        else:
+            return self.extra
+    extra_select = property(_extra_select)
 
     def set_start(self, start):
         """
@@ -2313,7 +2376,7 @@ class BaseQuery(object):
             return cursor
         if result_type == SINGLE:
             if self.ordering_aliases:
-                return cursor.fetchone()[:-len(results.ordering_aliases)]
+                return cursor.fetchone()[:-len(self.ordering_aliases)]
             return cursor.fetchone()
 
         # The MULTI case.
@@ -2388,3 +2451,11 @@ def add_to_dict(data, key, value):
         data[key].add(value)
     else:
         data[key] = set([value])
+
+def get_proxied_model(opts):
+    int_opts = opts
+    proxied_model = None
+    while int_opts.proxy:
+        proxied_model = int_opts.proxy_for_model
+        int_opts = proxied_model._meta
+    return proxied_model

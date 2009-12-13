@@ -1146,37 +1146,63 @@ possible to specify callable data.
 >>> class UserRegistration(Form):
 ...    username = CharField(max_length=10)
 ...    password = CharField(widget=PasswordInput)
+...    options = MultipleChoiceField(choices=[('f','foo'),('b','bar'),('w','whiz')])
 
 We need to define functions that get called later.
 >>> def initial_django():
 ...     return 'django'
 >>> def initial_stephane():
 ...     return 'stephane'
+>>> def initial_options():
+...     return ['f','b']
+>>> def initial_other_options():
+...     return ['b','w']
+
 
 Here, we're not submitting any data, so the initial value will be displayed.
->>> p = UserRegistration(initial={'username': initial_django}, auto_id=False)
+>>> p = UserRegistration(initial={'username': initial_django, 'options': initial_options}, auto_id=False)
 >>> print p.as_ul()
 <li>Username: <input type="text" name="username" value="django" maxlength="10" /></li>
 <li>Password: <input type="password" name="password" /></li>
+<li>Options: <select multiple="multiple" name="options">
+<option value="f" selected="selected">foo</option>
+<option value="b" selected="selected">bar</option>
+<option value="w">whiz</option>
+</select></li>
 
 The 'initial' parameter is meaningless if you pass data.
->>> p = UserRegistration({}, initial={'username': initial_django}, auto_id=False)
+>>> p = UserRegistration({}, initial={'username': initial_django, 'options': initial_options}, auto_id=False)
 >>> print p.as_ul()
 <li><ul class="errorlist"><li>This field is required.</li></ul>Username: <input type="text" name="username" maxlength="10" /></li>
 <li><ul class="errorlist"><li>This field is required.</li></ul>Password: <input type="password" name="password" /></li>
+<li><ul class="errorlist"><li>This field is required.</li></ul>Options: <select multiple="multiple" name="options">
+<option value="f">foo</option>
+<option value="b">bar</option>
+<option value="w">whiz</option>
+</select></li>
 >>> p = UserRegistration({'username': u''}, initial={'username': initial_django}, auto_id=False)
 >>> print p.as_ul()
 <li><ul class="errorlist"><li>This field is required.</li></ul>Username: <input type="text" name="username" maxlength="10" /></li>
 <li><ul class="errorlist"><li>This field is required.</li></ul>Password: <input type="password" name="password" /></li>
->>> p = UserRegistration({'username': u'foo'}, initial={'username': initial_django}, auto_id=False)
+<li><ul class="errorlist"><li>This field is required.</li></ul>Options: <select multiple="multiple" name="options">
+<option value="f">foo</option>
+<option value="b">bar</option>
+<option value="w">whiz</option>
+</select></li>
+>>> p = UserRegistration({'username': u'foo', 'options':['f','b']}, initial={'username': initial_django}, auto_id=False)
 >>> print p.as_ul()
 <li>Username: <input type="text" name="username" value="foo" maxlength="10" /></li>
 <li><ul class="errorlist"><li>This field is required.</li></ul>Password: <input type="password" name="password" /></li>
+<li>Options: <select multiple="multiple" name="options">
+<option value="f" selected="selected">foo</option>
+<option value="b" selected="selected">bar</option>
+<option value="w">whiz</option>
+</select></li>
 
 A callable 'initial' value is *not* used as a fallback if data is not provided.
 In this example, we don't provide a value for 'username', and the form raises a
 validation error rather than using the initial value for 'username'.
->>> p = UserRegistration({'password': 'secret'}, initial={'username': initial_django})
+>>> p = UserRegistration({'password': 'secret'}, initial={'username': initial_django, 'options': initial_options})
 >>> p.errors['username']
 [u'This field is required.']
 >>> p.is_valid()
@@ -1187,14 +1213,26 @@ then the latter will get precedence.
 >>> class UserRegistration(Form):
 ...    username = CharField(max_length=10, initial=initial_django)
 ...    password = CharField(widget=PasswordInput)
+...    options = MultipleChoiceField(choices=[('f','foo'),('b','bar'),('w','whiz')], initial=initial_other_options)
+
 >>> p = UserRegistration(auto_id=False)
 >>> print p.as_ul()
 <li>Username: <input type="text" name="username" value="django" maxlength="10" /></li>
 <li>Password: <input type="password" name="password" /></li>
->>> p = UserRegistration(initial={'username': initial_stephane}, auto_id=False)
+<li>Options: <select multiple="multiple" name="options">
+<option value="f">foo</option>
+<option value="b" selected="selected">bar</option>
+<option value="w" selected="selected">whiz</option>
+</select></li>
+>>> p = UserRegistration(initial={'username': initial_stephane, 'options': initial_options}, auto_id=False)
 >>> print p.as_ul()
 <li>Username: <input type="text" name="username" value="stephane" maxlength="10" /></li>
 <li>Password: <input type="password" name="password" /></li>
+<li>Options: <select multiple="multiple" name="options">
+<option value="f" selected="selected">foo</option>
+<option value="b" selected="selected">bar</option>
+<option value="w">whiz</option>
+</select></li>
 
 # Help text ###################################################################
 
@@ -1768,5 +1806,44 @@ True
 ['token']
 >>> [f.name for f in form.visible_fields()]
 ['artist', 'name']
+
+# Hidden initial input gets its own unique id ################################
+
+>>> class MyForm(Form):
+...     field1 = CharField(max_length=50, show_hidden_initial=True)
+>>> print MyForm()
+<tr><th><label for="id_field1">Field1:</label></th><td><input id="id_field1" type="text" name="field1" maxlength="50" /><input type="hidden" name="initial-field1" id="initial-id_field1" /></td></tr>
+
+# The error_html_class and required_html_class attributes ####################
+
+>>> p = Person({})
+>>> p.error_css_class = 'error'
+>>> p.required_css_class = 'required'
+
+>>> print p.as_ul()
+<li class="required error"><ul class="errorlist"><li>This field is required.</li></ul><label for="id_name">Name:</label> <input type="text" name="name" id="id_name" /></li>
+<li class="required"><label for="id_is_cool">Is cool:</label> <select name="is_cool" id="id_is_cool">
+<option value="1" selected="selected">Unknown</option>
+<option value="2">Yes</option>
+<option value="3">No</option>
+</select></li>
+
+>>> print p.as_p()
+<ul class="errorlist"><li>This field is required.</li></ul>
+<p class="required error"><label for="id_name">Name:</label> <input type="text" name="name" id="id_name" /></p>
+<p class="required"><label for="id_is_cool">Is cool:</label> <select name="is_cool" id="id_is_cool">
+<option value="1" selected="selected">Unknown</option>
+<option value="2">Yes</option>
+<option value="3">No</option>
+</select></p>
+
+>>> print p.as_table()
+<tr class="required error"><th><label for="id_name">Name:</label></th><td><ul class="errorlist"><li>This field is required.</li></ul><input type="text" name="name" id="id_name" /></td></tr>
+<tr class="required"><th><label for="id_is_cool">Is cool:</label></th><td><select name="is_cool" id="id_is_cool">
+<option value="1" selected="selected">Unknown</option>
+<option value="2">Yes</option>
+<option value="3">No</option>
+</select></td></tr>
+
 
 """

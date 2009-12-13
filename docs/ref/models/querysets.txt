@@ -20,7 +20,7 @@ Throughout this reference we'll use the :ref:`example weblog models
 When QuerySets are evaluated
 ============================
 
-Internally, a ``QuerySet`` can be constructed, filter, sliced, and generally
+Internally, a ``QuerySet`` can be constructed, filtered, sliced, and generally
 passed around without actually hitting the database. No database activity
 actually occurs until you do something to evaluate the queryset.
 
@@ -35,7 +35,7 @@ You can evaluate a ``QuerySet`` in the following ways:
 
     * **Slicing.** As explained in :ref:`limiting-querysets`, a ``QuerySet`` can
       be sliced, using Python's array-slicing syntax. Usually slicing a
-      ``QuerySet`` returns another (unevaluated ) ``QuerySet``, but Django will
+      ``QuerySet`` returns another (unevaluated) ``QuerySet``, but Django will
       execute the database query if you use the "step" parameter of slice
       syntax.
 
@@ -267,6 +267,12 @@ documentation`_ for the old behaviour.
 There's no way to specify whether ordering should be case sensitive. With
 respect to case-sensitivity, Django will order results however your database
 backend normally orders them.
+
+.. versionadded:: 1.1
+
+You can tell if a query is ordered or not by checking the
+:attr:`QuerySet.ordered` attribute, which will be ``True`` if the
+``QuerySet`` has been ordered in any way.
 
 ``reverse()``
 ~~~~~~~~~~~~~
@@ -610,6 +616,8 @@ call, since they are conflicting options.
 Both the ``depth`` argument and the ability to specify field names in the call
 to ``select_related()`` are new in Django version 1.0.
 
+.. _extra:
+
 ``extra(select=None, where=None, params=None, tables=None, order_by=None, select_params=None)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -660,7 +668,7 @@ of the arguments is required, but you should use at least one of them.
 
     The resulting SQL of the above example would be::
 
-        SELECT blog_blog.*, (SELECT COUNT(*) FROM blog_entry WHERE blog_entry.blog_id = blog_blog.id)
+        SELECT blog_blog.*, (SELECT COUNT(*) FROM blog_entry WHERE blog_entry.blog_id = blog_blog.id) AS entry_count
         FROM blog_blog;
 
     Note that the parenthesis required by most database engines around
@@ -1106,6 +1114,17 @@ Aggregation <topics-db-aggregation>`.
 
 .. _field-lookups:
 
+``exists()``
+~~~~~~~~~~~~
+
+.. versionadded:: 1.2
+
+Returns ``True`` if the :class:`QuerySet` contains any results, and ``False``
+if not. This tries to perform the query in the simplest and fastest way
+possible, but it *does* execute nearly the same query. This means that calling
+:meth:`QuerySet.exists()` is faster that ``bool(some_query_set)``, but not by
+a large degree.
+
 Field lookups
 -------------
 
@@ -1504,9 +1523,10 @@ regex
 
 Case-sensitive regular expression match.
 
-The regular expression syntax is that of the database backend in use. In the
-case of SQLite, which doesn't natively support regular-expression lookups, the
-syntax is that of Python's ``re`` module.
+The regular expression syntax is that of the database backend in use.
+In the case of SQLite, which has no built in regular expression support,
+this feature is provided by a (Python) user-defined REGEXP function, and
+the regular expression syntax is therefore that of Python's ``re`` module.
 
 Example::
 
