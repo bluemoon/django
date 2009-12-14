@@ -573,11 +573,15 @@ directory on the filesystem. Has three special arguments, of which the first is
 
 .. attribute:: FilePathField.allow_files
 
+    .. versionadded:: 1.2
+
     Optional.  Either ``True`` or ``False``.  Default is ``True``.  Specifies
     whether files in the specified location should be included.  Either this or
     :attr:`~FilePathField.allow_folders` must be ``True``.
 
 .. attribute:: FilePathField.allow_folders
+
+    .. versionadded:: 1.2
 
     Optional.  Either ``True`` or ``False``.  Default is ``False``.  Specifies
     whether folders in the specified location should be included.  Either this
