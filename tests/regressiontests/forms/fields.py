@@ -30,7 +30,7 @@ import time
 import re
 import os
 
-from decimal import Decimal, DecimalException
+from decimal import Decimal
 from unittest import TestCase
 
 from django.core.files.uploadedfile import SimpleUploadedFile
