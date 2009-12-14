@@ -30,16 +30,12 @@ import time
 import re
 import os
 
+from decimal import Decimal, DecimalException
 from unittest import TestCase
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms import *
 from django.forms.widgets import RadioFieldRenderer
-
-try:
-    from decimal import Decimal
-except ImportError:
-    from django.utils._decimal import Decimal
 
 
 def fix_os_paths(x):
@@ -827,9 +823,9 @@ class FieldsTests(TestCase):
         ]
         for exp, got in zip(expected, fix_os_paths(f.choices)):
             self.assertEqual(exp[1], got[1])
-            self.assert_(got[0].startswith(exp[0])
+            self.assert_(got[0].endswith(exp[0]))
         
-        f = forms.FilePathField(path=path, allow_folders=True, allow_files=True)
+        f = FilePathField(path=path, allow_folders=True, allow_files=True)
         f.choices.sort()
         expected = [
             ('/django/forms/__init__.py', '__init__.py'),
@@ -839,6 +835,7 @@ class FieldsTests(TestCase):
             ('/django/forms/fields.pyc', 'fields.pyc'),
             ('/django/forms/forms.py', 'forms.py'),
             ('/django/forms/forms.pyc', 'forms.pyc'),
+            ('/django/forms/formsets.py', 'formsets.py'),
             ('/django/forms/formsets.pyc', 'formsets.pyc'),
             ('/django/forms/models.py', 'models.py'),
             ('/django/forms/models.pyc', 'models.pyc'),
@@ -849,7 +846,7 @@ class FieldsTests(TestCase):
         ]
         for exp, got in zip(expected, fix_os_paths(f.choices)):
             self.assertEqual(exp[1], got[1])
-            self.assert_(got[0].startswith(exp[0])
+            self.assert_(got[0].endswith(exp[0]))
 
 
     # SplitDateTimeField ##########################################################
