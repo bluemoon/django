@@ -818,9 +818,6 @@ class FilePathField(ChoiceField):
         initial=None, help_text=None, *args, **kwargs):
         self.path, self.match, self.recursive = path, match, recursive
         self.allow_files, self.allow_folders = allow_files, allow_folders
-        if not (allow_folders or allow_files):
-            raise ValueError("FilePathFields must have either allow_files or "
-                "allow_folders set to True")
         super(FilePathField, self).__init__(choices=(), required=required,
             widget=widget, label=label, initial=initial, help_text=help_text,
             *args, **kwargs)
