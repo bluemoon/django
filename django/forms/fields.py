@@ -13,15 +13,6 @@ try:
 except ImportError:
     from StringIO import StringIO
 
-# Python 2.3 fallbacks
-try:
-    from decimal import Decimal, DecimalException
-except ImportError:
-    from django.utils._decimal import Decimal, DecimalException
-try:
-    set
-except NameError:
-    from sets import Set as set
 
 import django.core.exceptions
 from django.utils.translation import ugettext_lazy as _
@@ -827,7 +818,9 @@ class FilePathField(ChoiceField):
         initial=None, help_text=None, *args, **kwargs):
         self.path, self.match, self.recursive = path, match, recursive
         self.allow_files, self.allow_folders = allow_files, allow_folders
-        assert self.allow_files or self.allow_folders
+        if not (allow_folders or allow_files):
+            raise ValueError("FilePathFields must have either allow_files or "
+                "allow_folders set to True")
         super(FilePathField, self).__init__(choices=(), required=required,
             widget=widget, label=label, initial=initial, help_text=help_text,
             *args, **kwargs)

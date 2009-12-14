@@ -671,7 +671,6 @@ class FilePathField(Field):
         recursive=False, allow_files=True, allow_folders=False, **kwargs):
         self.path, self.match, self.recursive = path, match, recursive
         self.allow_files, self.allow_folders =  allow_files, allow_folders
-        assert self.allow_files or self.allow_folders
         kwargs['max_length'] = kwargs.get('max_length', 100)
         Field.__init__(self, verbose_name, name, **kwargs)
 
