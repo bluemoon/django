@@ -100,10 +100,33 @@ class ChangeList(object):
         if not ordering:
             return qs
 
+        direction = ""
         if ordering[0] == "-":
             ordering_field = ordering[1:]
-        #TODO: Finish
+            direction = "-"
+        try:
+            field_name = self.list_display[int(ordering)]
+            try:
+                order_field = self.model._meta.get_field_by_name(field_name)[0].name
+            except FieldDoesNotExist:
+                try:
+                    if callable(field_name):
+                        attr = field_name
+                    elif hasattr(self.model, field_name):
+                        attr = getattr(self.model, field_name)
+                    # TODO: Handle the model_admin here
+                    order_field = attr.admin_order_field
+                except AttributeError:
+                    pass
+        except (IndexError, ValueError):
+            pass
+        if ORDER_TYPE_VAR in self.request.GET:
+            direction = {
+                "asc": "",
+                "desc": "-",
+            }[self.request.GET[ORDER_TYPE_VAR]]
 
+        return qs.order_by("%s%s" % (direction, ordering_field))
 
     @cached_attribute
     def full_count(self):
