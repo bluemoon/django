@@ -357,3 +357,12 @@ class SimpleLazyObject(LazyObject):
 
     def _setup(self):
         self._wrapped = self._setupfunc()
+
+def cached_attr(function):
+    cache_name = "_%s" % function.__name__
+    @wraps(function)
+    def inner(self, *args, **kwargs):
+        if not hasattr(self, cache_name):
+            setattr(self, cache_name, function(self, *args, **kwargs))
+        return getattr(self, cache_name)
+    return inner

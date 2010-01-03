@@ -1,3 +1,12 @@
+import operator
+
+from django.contrib.admin.options import IncorrectLookupParameters
+from django.core.pagination import Paginator, EmptyPage, InvalidPage
+from django.db.models import ManyToOneRel, FieldDoesNotExist, Q
+from django.utils.encoding import smart_str
+from django.utils.functional import cached_attr
+
+
 ALL_VAR = 'all'
 ORDER_VAR = 'o'
 ORDER_TYPE_VAR = 'ot'
@@ -23,7 +32,7 @@ class ChangeList(object):
         self.list_select_related = list_select_related
         self.list_per_page = list_per_page
 
-    @cached_attribute
+    @cached_attr
     def queryset(self):
         qs = self.apply_filters(self.base_queryset)
         qs = self.apply_search(qs)
@@ -35,7 +44,7 @@ class ChangeList(object):
             else:
                 for field in self.list_display:
                     try:
-                        f = self.model._meta.get_field_by_name(f)[0]
+                        f = self.model._meta.get_field_by_name(field)[0]
                         if isinstance(f.rel, ManyToOneRel):
                             qs = qs.select_related()
                             break
@@ -51,7 +60,7 @@ class ChangeList(object):
 
     def apply_filters(self, qs):
         lookup_params = self.request.GET.copy()
-        for i in META_VARS:
+        for i in META_FLAGS:
             lookup_params.pop(i)
 
         for key, val in lookup_params.iteritems():
@@ -102,12 +111,12 @@ class ChangeList(object):
 
         direction = ""
         if ordering[0] == "-":
-            ordering_field = ordering[1:]
+            ordering = ordering[1:]
             direction = "-"
         try:
             field_name = self.list_display[int(ordering)]
             try:
-                order_field = self.model._meta.get_field_by_name(field_name)[0].name
+                ordering_field = self.model._meta.get_field_by_name(field_name)[0].name
             except FieldDoesNotExist:
                 try:
                     if callable(field_name):
@@ -115,7 +124,7 @@ class ChangeList(object):
                     elif hasattr(self.model, field_name):
                         attr = getattr(self.model, field_name)
                     # TODO: Handle the model_admin here
-                    order_field = attr.admin_order_field
+                    ordering_field = attr.admin_order_field
                 except AttributeError:
                     pass
         except (IndexError, ValueError):
@@ -128,12 +137,12 @@ class ChangeList(object):
 
         return qs.order_by("%s%s" % (direction, ordering_field))
 
-    @cached_attribute
+    @cached_attr
     def full_count(self):
         if self.queryset().query.where:
             return self.base_queryset.all()
         return self.queryset().count()
 
-    @cached_attribute
+    @cached_attr
     def count(self):
         return self.queryset().count()
