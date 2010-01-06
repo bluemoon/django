@@ -63,10 +63,19 @@ class AdminViewBasicTest(TestCase):
 
     def testBasicEditGet(self):
         """
-        A smoke test to ensureGET on the change_view works.
+        A smoke test to ensure GET on the change_view works.
         """
         response = self.client.get('/test_admin/%s/admin_views/section/1/' % self.urlbit)
         self.failUnlessEqual(response.status_code, 200)
+
+    def testBasicEditGetStringPK(self):
+        """
+        A smoke test to ensure GET on the change_view works (returns an HTTP
+        404 error, see #11191) when passing a string as the PK argument for a
+        model with an integer PK field.
+        """
+        response = self.client.get('/test_admin/%s/admin_views/section/abc/' % self.urlbit)
+        self.failUnlessEqual(response.status_code, 404)
 
     def testBasicAddPost(self):
         """
@@ -1199,6 +1208,13 @@ class AdminActionsTest(TestCase):
         msg = """No action selected."""
         self.assertContains(response, msg)
         self.failUnlessEqual(Subscriber.objects.count(), 2)
+
+    def test_selection_counter(self):
+        """
+        Check if the selection counter is there.
+        """
+        response = self.client.get('/test_admin/admin/admin_views/subscriber/')
+        self.assertContains(response, '<span class="_acnt">0</span> of 2 subscribers selected')
 
 
 class TestCustomChangeList(TestCase):

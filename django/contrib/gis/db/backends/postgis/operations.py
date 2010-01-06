@@ -8,8 +8,7 @@ from django.contrib.gis.db.backends.postgis.adapter import PostGISAdapter
 from django.contrib.gis.geometry.backend import Geometry
 from django.contrib.gis.measure import Distance
 from django.core.exceptions import ImproperlyConfigured
-from django.db.backends.postgresql.operations import DatabaseOperations
-from django.db.backends.postgresql_psycopg2.base import Database
+from django.db.backends.postgresql_psycopg2.base import Database, DatabaseOperations
 
 #### Classes used in constructing PostGIS spatial SQL ####
 class PostGISOperator(SpatialOperation):
@@ -199,9 +198,11 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         if version < (1, 3, 0):
             UNIONAGG = 'GeomUnion'
             UNION = 'Union'
+            MAKELINE = False
         else:
             UNIONAGG = 'ST_Union'
             UNION = 'ST_Union'
+            MAKELINE = 'ST_MakeLine'
 
         # Only PostGIS versions 1.3.4+ have GeoJSON serialization support.
         if version < (1, 3, 4):
@@ -212,11 +213,10 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         # ST_ContainsProperly ST_MakeLine, and ST_GeoHash added in 1.4.
         if version >= (1, 4, 0):
             GEOHASH = 'ST_GeoHash'
-            MAKELINE = 'ST_MakeLine'
             BOUNDINGCIRCLE = 'ST_MinimumBoundingCircle'
             self.geometry_functions['contains_properly'] = PostGISFunction(prefix, 'ContainsProperly')
         else:
-            GEOHASH, MAKELINE, BOUNDINGCIRCLE = False, False, False
+            GEOHASH, BOUNDINGCIRCLE = False, False
 
         # Geography type support added in 1.5.
         if version >= (1, 5, 0):
@@ -403,11 +403,12 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
         """
         cursor = self.connection._cursor()
         try:
-            cursor.execute('SELECT %s()' % func)
-            row = cursor.fetchone()
-        except:
-            # Responsibility of callers to perform error handling.
-            raise
+            try:
+                cursor.execute('SELECT %s()' % func)
+                row = cursor.fetchone()
+            except:
+                # Responsibility of callers to perform error handling.
+                raise
         finally:
             cursor.close()
         return row[0]
@@ -449,6 +450,19 @@ class PostGISOperations(DatabaseOperations, BaseSpatialOperations):
             raise Exception('Could not parse PostGIS version string: %s' % version)
 
         return (version, major, minor1, minor2)
+
+    def proj_version_tuple(self):
+        """
+        Return the version of PROJ.4 used by PostGIS as a tuple of the
+        major, minor, and subminor release numbers.
+        """
+        proj_regex = re.compile(r'(\d+)\.(\d+)\.(\d+)')
+        proj_ver_str = self.postgis_proj_version()
+        m = proj_regex.search(proj_ver_str)
+        if m:
+            return tuple(map(int, [m.group(1), m.group(2), m.group(3)]))
+        else:
+            raise Exception('Could not determine PROJ.4 version from PostGIS.')
 
     def num_params(self, lookup_type, num_param):
         """

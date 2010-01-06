@@ -84,6 +84,7 @@ LANGUAGES = (
     ('sk', gettext_noop('Slovak')),
     ('sl', gettext_noop('Slovenian')),
     ('sr', gettext_noop('Serbian')),
+    ('sr-latn', gettext_noop('Serbian Latin')),
     ('sv', gettext_noop('Swedish')),
     ('ta', gettext_noop('Tamil')),
     ('te', gettext_noop('Telugu')),
@@ -142,7 +143,7 @@ DATABASES = {
 # The default is to use the SMTP backend.
 # Third-party backends can be specified by providing a Python path
 # to a module that defines an EmailBackend class.
-EMAIL_BACKEND = 'django.core.mail.backends.smtp'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # Host for sending e-mail.
 EMAIL_HOST = 'localhost'

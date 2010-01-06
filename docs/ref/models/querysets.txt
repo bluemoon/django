@@ -94,7 +94,7 @@ the query construction and is not part of the public API. However, it is safe
 (and fully supported) to pickle and unpickle the attribute's contents as
 described here.
 
-.. _pickle: http://docs.python.org/lib/module-pickle.html
+.. _pickle: http://docs.python.org/library/pickle.html
 
 .. _queryset-api:
 
@@ -1131,8 +1131,6 @@ control the name of the aggregation value that is returned::
 For an in-depth discussion of aggregation, see :ref:`the topic guide on
 Aggregation <topics-db-aggregation>`.
 
-.. _field-lookups:
-
 ``exists()``
 ~~~~~~~~~~~~
 
@@ -1146,6 +1144,8 @@ a large degree.  If ``some_query_set`` has not yet been evaluated, but you know
 that it will be at some point, then using ``some_query_set.exists()`` will do
 more overall work (an additional query) than simply using
 ``bool(some_query_set)``.
+
+.. _field-lookups:
 
 Field lookups
 -------------

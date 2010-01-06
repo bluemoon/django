@@ -9,9 +9,10 @@ from django.utils.functional import SimpleLazyObject
 
 import timesince
 import datastructures
-import dateformat
 import itercompat
+
 from decorators import DecoratorFromMiddlewareTests
+from functional import FunctionalTestCase
 
 # We need this because "datastructures" uses sorted() and the tests are run in
 # the scope of this module.
@@ -28,6 +29,7 @@ __test__ = {
 }
 
 from dateformat import *
+from termcolors import *
 
 class TestUtilsHtml(TestCase):
 

@@ -232,6 +232,16 @@ party packages, or that you wrote yourself, you should ensure that the
 information, see
 :ref:`template tag thread safety considerations<template_tag_thread_safety>`.
 
+Test runner exit status code
+----------------------------
+
+The exit status code of the test runners (``tests/runtests.py`` and ``python
+manage.py test``) no longer represents the number of failed tests, since a
+failure of 256 or more tests resulted in a wrong exit status code.  The exit
+status code for the test runner is now 0 for success (no failing tests) and 1
+for any number of test failures.  If needed, the number of test failures can be
+found at the end of the test runner's output.
+
 .. _deprecated-features-1.2:
 
 Features deprecated in 1.2
@@ -276,7 +286,7 @@ connection with which to send e-mail, you can explicitly request an
 SMTP connection::
 
     from django.core.mail import get_connection
-    connection = get_connection('django.core.mail.backends.smtp')
+    connection = get_connection('django.core.mail.backends.smtp.EmailBackend')
     messages = get_notification_email()
     connection.send_messages(messages)
 
@@ -284,7 +294,7 @@ If your call to construct an instance of ``SMTPConnection`` required
 additional arguments, those arguments can be passed to the
 :meth:`~django.core.mail.get_connection()` call::
 
-    connection = get_connection('django.core.mail.backends.smtp', hostname='localhost', port=1234)
+    connection = get_connection('django.core.mail.backends.smtp.EmailBackend', hostname='localhost', port=1234)
 
 User Messages API
 -----------------
@@ -471,10 +481,12 @@ Models can now use a 64 bit :class:`~django.db.models.BigIntegerField` type.
 Fast Failure for Tests
 ----------------------
 
-The ``test`` subcommand of ``django-admin.py``, and the ``runtests.py`` script
-used to run Django's own test suite, support a new ``--failfast`` option. 
-When specified, this option causes the test runner to exit after 
-encountering a failure instead of continuing with the test run.
+The :djadmin:`test` subcommand of ``django-admin.py``, and the ``runtests.py``
+script used to run Django's own test suite, support a new ``--failfast`` option.
+When specified, this option causes the test runner to exit after encountering
+a failure instead of continuing with the test run.  In addition, the handling
+of ``Ctrl-C`` during a test run has been improved to trigger a graceful exit
+from the test run that reports details of the tests run before the interruption.
 
 Improved localization
 ---------------------
@@ -492,3 +504,10 @@ Added ``readonly_fields`` to ``ModelAdmin``
 :attr:`django.contrib.admin.ModelAdmin.readonly_fields` has been added to
 enable non-editable fields in add/change pages for models and inlines. Field
 and calculated values can be displayed along side editable fields.
+
+Customizable syntax highlighting
+--------------------------------
+
+You can now use the ``DJANGO_COLORS`` environment variable to modify
+or disable the colors used by ``django-admin.py`` to provide
+:ref:`syntax highlighting <syntax-coloring>`.

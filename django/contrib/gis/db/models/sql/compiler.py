@@ -55,8 +55,8 @@ class GeoSQLCompiler(compiler.SQLCompiler):
                         aliases.add(r)
                         col_aliases.add(col[1])
                 else:
-                    result.append(col.as_sql(qn=qn))
-
+                    result.append(col.as_sql(qn, self.connection))
+                    
                     if hasattr(col, 'alias'):
                         aliases.add(col.alias)
                         col_aliases.add(col.alias)
@@ -70,7 +70,7 @@ class GeoSQLCompiler(compiler.SQLCompiler):
         max_name_length = self.connection.ops.max_name_length()
         result.extend([
                 '%s%s' % (
-                    self.get_extra_select_format(alias) % aggregate.as_sql(qn=qn, connection=self.connection),
+                    self.get_extra_select_format(alias) % aggregate.as_sql(qn, self.connection),
                     alias is not None
                         and ' AS %s' % qn(truncate_name(alias, max_name_length))
                         or ''
@@ -191,8 +191,8 @@ class GeoSQLCompiler(compiler.SQLCompiler):
         if self.connection.ops.oracle or getattr(self.query, 'geo_values', False):
             # We resolve the rest of the columns if we're on Oracle or if
             # the `geo_values` attribute is defined.
-            for value, field in izip(row[index_start:], fields):
-                values.append(self.query.convert_values(value, field, self.connection))
+            for value, field in map(None, row[index_start:], fields):
+                values.append(self.query.convert_values(value, field, connection=self.connection))
         else:
             values.extend(row[index_start:])
         return tuple(values)

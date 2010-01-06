@@ -147,7 +147,7 @@ as must have ``CREATE DATABASE`` rights.
 For more details about how doctest works, see the `standard library
 documentation for doctest`_.
 
-.. _doctest: http://docs.python.org/lib/module-doctest.html
+.. _doctest: http://docs.python.org/library/doctest.html
 .. _standard library documentation for doctest: doctest_
 
 Writing unit tests
@@ -197,9 +197,9 @@ suite.
 For more details about ``unittest``, see the `standard library unittest
 documentation`_.
 
-.. _unittest: http://docs.python.org/lib/module-unittest.html
+.. _unittest: http://docs.python.org/library/unittest.html
 .. _standard library unittest documentation: unittest_
-.. _suggested organization: http://docs.python.org/lib/organizing-tests.html
+.. _suggested organization: http://docs.python.org/library/unittest.html#organizing-tests
 
 Which should I use?
 -------------------
@@ -242,8 +242,8 @@ in different circumstances.
 Running tests
 =============
 
-Once you've written tests, run them using your project's ``manage.py``
-utility::
+Once you've written tests, run them using the :djadmin:`test` subcommand of
+your project's ``manage.py`` utility::
 
     $ ./manage.py test
 
@@ -273,6 +273,23 @@ And it gets even more granular than that! To run a *single* test method inside
 a test case, add the name of the test method to the label::
 
     $ ./manage.py test animals.AnimalTestCase.testFluffyAnimals
+
+.. versionadded:: 1.2
+   You can now trigger a graceful exit from a test run by pressing ``Ctrl-C``. 
+
+If you press ``Ctrl-C`` while the tests are running, the test runner will 
+wait for the currently running test to complete and then exit gracefully.
+During a graceful exit the test runner will output details of any test 
+failures, report on how many tests were run and how many errors and failures
+were encountered, and destroy any test databases as usual. Thus pressing 
+``Ctrl-C`` can be very useful if you forget to pass the :djadminopt:`--failfast`
+option, notice that some tests are unexpectedly failing, and want to get details 
+on the failures without waiting for the full test run to complete.
+
+If you do not want to wait for the currently running test to finish, you
+can press ``Ctrl-C`` a second time and the test run will halt immediately,
+but not gracefully. No details of the tests run before the interruption will
+be reported, and any test databases created by the run will not be destroyed.
 
 The test database
 -----------------
@@ -414,7 +431,7 @@ a different focus. In short:
 A comprehensive test suite should use a combination of both test types.
 
 .. _Twill: http://twill.idyll.org/
-.. _Selenium: http://www.openqa.org/selenium/
+.. _Selenium: http://seleniumhq.org/
 
 Overview and a quick example
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -467,8 +484,8 @@ Note a few important things about how the test client works:
       This black magic (essentially a patching of Django's template system in
       memory) only happens during test running.
 
-.. _urllib: http://docs.python.org/lib/module-urllib.html
-.. _urllib2: http://docs.python.org/lib/module-urllib2.html
+.. _urllib: http://docs.python.org/library/urllib.html
+.. _urllib2: http://docs.python.org/library/urllib2.html
 
 Making requests
 ~~~~~~~~~~~~~~~
@@ -809,7 +826,7 @@ can access these properties as part of a test condition.
     A dictionary-like object containing session information. See the
     :ref:`session documentation<topics-http-sessions>` for full details.
 
-.. _Cookie module documentation: http://docs.python.org/lib/module-Cookie.html
+.. _Cookie module documentation: http://docs.python.org/library/cookie.html
 
 Example
 ~~~~~~~
