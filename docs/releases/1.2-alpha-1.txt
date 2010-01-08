@@ -1,19 +1,22 @@
-.. _releases-1.2:
+.. _releases-1.2-alpha-1:
 
-============================================
-Django 1.2 release notes — UNDER DEVELOPMENT
-============================================
+================================
+Django 1.2 alpha 1 release notes
+================================
 
-This page documents release notes for the as-yet-unreleased Django 1.2.  As such
-it is tentative and subject to change.  It provides up-to-date information for
-those who are following trunk.
+January 5, 2010
 
-Django 1.2 includes a number of nifty `new features`_, lots of bug
-fixes, and an easy upgrade path from Django 1.1.
+Welcome to Django 1.2 alpha 1!
 
-.. _new features: `What's new in Django 1.2`_
+This is the first in a series of preview/development releases leading up to the
+eventual release of Django 1.2, currently scheduled to take place in March 2010.
+This release is primarily targeted at developers who are interested in trying
+out new features and testing the Django codebase to help identify and resolve
+bugs prior to the final 1.2 release.
 
-.. _backwards-incompatible-changes-1.2:
+As such, this release is *not* intended for production use, and any such use is
+discouraged.
+
 
 Backwards-incompatible changes in 1.2
 =====================================
@@ -26,21 +29,22 @@ There have been large changes to the way that CSRF protection works, detailed in
 changes that developers must be aware of:
 
  * ``CsrfResponseMiddleware`` and ``CsrfMiddleware`` have been deprecated, and
-   will be removed completely in Django 1.4, in favor of a template tag that
+   **will be removed completely in Django 1.4**, in favor of a template tag that
    should be inserted into forms.
 
- * All contrib apps use a ``csrf_protect`` decorator to protect the view.  This
-   requires the use of the csrf_token template tag in the template, so if you
+ * All contrib apps use a ``csrf_protect`` decorator to protect the view. This
+   requires the use of the ``csrf_token`` template tag in the template, so if you
    have used custom templates for contrib views, you MUST READ THE :ref:`UPGRADE
    INSTRUCTIONS <ref-csrf-upgrading-notes>` to fix those templates.
 
  * ``CsrfViewMiddleware`` is included in :setting:`MIDDLEWARE_CLASSES` by
    default. This turns on CSRF protection by default, so that views that accept
-   POST requests need to be written to work with the middleware.  Instructions
+   POST requests need to be written to work with the middleware. Instructions
    on how to do this are found in the CSRF docs.
 
- * All of the CSRF has moved from contrib to core (with backwards compatible
-   imports in the old locations, which are deprecated).
+ * CSRF-related code has moved from ``contrib`` to ``core`` (with
+   backwards compatible imports in the old locations, which are
+   deprecated).
 
 :ttag:`if` tag changes
 ----------------------
@@ -76,68 +80,6 @@ changes:
 
        __members__ = property(lambda self: self.__dir__())
 
-Specifying databases
---------------------
-
-Prior to Django 1.1, Django used a number of settings to control access to a
-single database. Django 1.2 introduces support for multiple databases, and as
-a result, the way you define database settings has changed.
-
-Any existing Django settings file will continue to work as expected until
-Django 1.4. Old-style database settings will be automatically translated to
-the new-style format.
-
-In the old-style (pre 1.2) format, there were a number of
-``DATABASE_`` settings at the top level of your settings file. For
-example::
-
-    DATABASE_NAME = 'test_db'
-    DATABASE_ENGINE = 'postgresql_psycopg2'
-    DATABASE_USER = 'myusername'
-    DATABASE_PASSWORD = 's3krit'
-
-These settings are now contained inside a dictionary named
-:setting:`DATABASES`. Each item in the dictionary corresponds to a
-single database connection, with the name ``'default'`` describing the
-default database connection. The setting names have also been
-shortened to reflect the fact that they are stored in a dictionary.
-The sample settings given previously would now be stored using::
-
-    DATABASES = {
-        'default': {
-            'NAME': 'test_db',
-            'ENGINE': 'django.db.backends.postgresql_psycopg2',
-            'USER': 'myusername',
-            'PASSWORD': 's3krit',
-        }
-    }
-
-This affects the following settings:
-
-    =========================================  ==========================
-     Old setting                                New Setting
-    =========================================  ==========================
-    :setting:`DATABASE_ENGINE`                 :setting:`ENGINE`
-    :setting:`DATABASE_HOST`                   :setting:`HOST`
-    :setting:`DATABASE_NAME`                   :setting:`NAME`
-    :setting:`DATABASE_OPTIONS`                :setting:`OPTIONS`
-    :setting:`DATABASE_PASSWORD`               :setting:`PASSWORD`
-    :setting:`DATABASE_PORT`                   :setting:`PORT`
-    :setting:`DATABASE_USER`                   :setting:`USER`
-    :setting:`TEST_DATABASE_CHARSET`           :setting:`TEST_CHARSET`
-    :setting:`TEST_DATABASE_COLLATION`         :setting:`TEST_COLLATION`
-    :setting:`TEST_DATABASE_NAME`              :setting:`TEST_NAME`
-    =========================================  ==========================
-
-These changes are also required if you have manually created a database
-connection using ``DatabaseWrapper()`` from your database backend of choice.
-
-In addition to the change in structure, Django 1.2 removes the special
-handling for the built-in database backends. All database backends
-must now be specified by a fully qualified module name (i.e.,
-``django.db.backends.postgresql_psycopg2``, rather than just
-``postgresql_psycopg2``).
-
 ``__dict__`` on Model instances
 -------------------------------
 
@@ -148,7 +90,7 @@ In order to support multiple database configurations, Django 1.2 has
 added a ``_state`` attribute to object instances. This attribute will
 appear in ``__dict__`` for a model instance. If your code relies on
 iterating over __dict__ to obtain a list of fields, you must now
-filter out ``_state`` attribute of out ``__dict__``.
+filter the ``_state`` attribute of out ``__dict__``.
 
 ``get_db_prep_*()`` methods on Field
 ------------------------------------
@@ -190,7 +132,7 @@ two extra methods have been introduced::
         def get_db_prep_lookup(self, lookup_type, value, connection, prepared=False):
             # ...
 
-These changes are required to support multiple databases -
+These changes are required to support multiple databases:
 ``get_db_prep_*`` can no longer make any assumptions regarding the
 database for which it is preparing. The ``connection`` argument now
 provides the preparation methods with the specific connection for
@@ -241,8 +183,6 @@ failure of 256 or more tests resulted in a wrong exit status code.  The exit
 status code for the test runner is now 0 for success (no failing tests) and 1
 for any number of test failures.  If needed, the number of test failures can be
 found at the end of the test runner's output.
-
-.. _deprecated-features-1.2:
 
 Features deprecated in 1.2
 ==========================
@@ -295,6 +235,68 @@ additional arguments, those arguments can be passed to the
 :meth:`~django.core.mail.get_connection()` call::
 
     connection = get_connection('django.core.mail.backends.smtp.EmailBackend', hostname='localhost', port=1234)
+
+Specifying databases
+--------------------
+
+Prior to Django 1.1, Django used a number of settings to control access to a
+single database. Django 1.2 introduces support for multiple databases, and as
+a result, the way you define database settings has changed.
+
+**Any existing Django settings file will continue to work as expected
+until Django 1.4.** Old-style database settings will be automatically
+translated to the new-style format.
+
+In the old-style (pre 1.2) format, there were a number of
+``DATABASE_`` settings at the top level of your settings file. For
+example::
+
+    DATABASE_NAME = 'test_db'
+    DATABASE_ENGINE = 'postgresql_psycopg2'
+    DATABASE_USER = 'myusername'
+    DATABASE_PASSWORD = 's3krit'
+
+These settings are now contained inside a dictionary named
+:setting:`DATABASES`. Each item in the dictionary corresponds to a
+single database connection, with the name ``'default'`` describing the
+default database connection. The setting names have also been
+shortened to reflect the fact that they are stored in a dictionary.
+The sample settings given previously would now be stored using::
+
+    DATABASES = {
+        'default': {
+            'NAME': 'test_db',
+            'ENGINE': 'django.db.backends.postgresql_psycopg2',
+            'USER': 'myusername',
+            'PASSWORD': 's3krit',
+        }
+    }
+
+This affects the following settings:
+
+    =========================================  ==========================
+     Old setting                                New Setting
+    =========================================  ==========================
+    :setting:`DATABASE_ENGINE`                 :setting:`ENGINE`
+    :setting:`DATABASE_HOST`                   :setting:`HOST`
+    :setting:`DATABASE_NAME`                   :setting:`NAME`
+    :setting:`DATABASE_OPTIONS`                :setting:`OPTIONS`
+    :setting:`DATABASE_PASSWORD`               :setting:`PASSWORD`
+    :setting:`DATABASE_PORT`                   :setting:`PORT`
+    :setting:`DATABASE_USER`                   :setting:`USER`
+    :setting:`TEST_DATABASE_CHARSET`           :setting:`TEST_CHARSET`
+    :setting:`TEST_DATABASE_COLLATION`         :setting:`TEST_COLLATION`
+    :setting:`TEST_DATABASE_NAME`              :setting:`TEST_NAME`
+    =========================================  ==========================
+
+These changes are also required if you have manually created a database
+connection using ``DatabaseWrapper()`` from your database backend of choice.
+
+In addition to the change in structure, Django 1.2 removes the special
+handling for the built-in database backends. All database backends
+must now be specified by a fully qualified module name (i.e.,
+``django.db.backends.postgresql_psycopg2``, rather than just
+``postgresql_psycopg2``).
 
 User Messages API
 -----------------
@@ -363,8 +365,15 @@ The same applies to the globals found in ``django.forms.fields``:
 
 Use ``django.utils.formats.get_format()`` to get the appropriate formats.
 
-What's new in Django 1.2
-========================
+
+What's new in Django 1.2 alpha 1
+================================
+
+The following new features are present as of this alpha release; this
+release also marks the end of major feature development for the 1.2
+release cycle. Some minor features will continue development until the
+1.2 beta release, however.
+
 
 CSRF support
 ------------
@@ -512,13 +521,60 @@ You can now use the ``DJANGO_COLORS`` environment variable to modify
 or disable the colors used by ``django-admin.py`` to provide
 :ref:`syntax highlighting <syntax-coloring>`.
 
-Model validation
-----------------
 
-Model instances now have support for :ref:`validating their own data
-<validating-objects`, and both model and form fields now accept
-configurable lists of :ref:`validators <ref-validators>` specifying
-reusable, encapsulated validation behavior. Note, however, that
-validation must still be performed explicitly: simply invoking a model
-instance's ``save()`` method will not perform any validation of the
-instance's data.
+The Django 1.2 roadmap
+======================
+
+Before the final Django 1.2 release, several other preview/development
+releases will be made available. The current schedule consists of at
+least the following:
+
+* Week of **January 26, 2010**: First Django 1.2 beta release. Final
+  feature freeze for Django 1.2.
+
+* Week of **March 2, 2010**: First Django 1.2 release
+  candidate. String freeze for translations.
+
+* Week of **March 9, 2010**: Django 1.2 final release.
+
+If necessary, additional alpha, beta or release-candidate packages
+will be issued prior to the final 1.2 release. Django 1.2 will be
+released approximately one week after the final release candidate.
+
+
+What you can do to help
+=======================
+
+In order to provide a high-quality 1.2 release, we need your help. Although this
+alpha release is, again, *not* intended for production use, you can help the
+Django team by trying out the alpha codebase in a safe test environment and
+reporting any bugs or issues you encounter. The Django ticket tracker is the
+central place to search for open issues:
+
+    * http://code.djangoproject.com/timeline
+
+Please open new tickets if no existing ticket corresponds to a problem you're
+running into.
+
+Additionally, discussion of Django development, including progress toward the
+1.2 release, takes place daily on the django-developers mailing list:
+
+    * http://groups.google.com/group/django-developers
+
+... and in the ``#django-dev`` IRC channel on ``irc.freenode.net``. If you're
+interested in helping out with Django's development, feel free to join the
+discussions there.
+
+Django's online documentation also includes pointers on how to contribute to
+Django:
+
+    * :ref:`How to contribute to Django <internals-contributing>`
+
+Contributions on any level -- developing code, writing documentation or simply
+triaging tickets and helping to test proposed bugfixes -- are always welcome and
+appreciated.
+
+Development sprints for Django 1.2 will also be taking place at PyCon
+US 2010, on the dedicated sprint days (February 22 through 25), and
+anyone who wants to help out is welcome to join in, either in person
+at PyCon or virtually in the IRC channel or on the mailing list.
