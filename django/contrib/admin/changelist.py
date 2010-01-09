@@ -79,10 +79,11 @@ class ChangeList(object):
             # Naked except because we're idiot developers, and you the user
             # clearly know better.  Ingrates.
             raise IncorrectLookupParameters
+    @property
+    def query(self):
+        return self.request.GET.get(SEARCH_VAR, "")
 
     def apply_search(self, qs):
-        query = self.request.GET.get(SEARCH_VAR)
-
         def construct_search(field_name):
             if field_name.startswith("^"):
                 return "%s__istartswith" % field_name[1:]
@@ -93,8 +94,8 @@ class ChangeList(object):
             else:
                 return "%s__icontains" % field_name
 
-        if self.search_fields and query:
-            for bit in query.strip():
+        if self.search_fields and self.query:
+            for bit in self.query.strip():
                 or_queries = [
                     Q(**{construct_search(smart_str(field_name)): bit})
                     for field_name in self.search_fields
