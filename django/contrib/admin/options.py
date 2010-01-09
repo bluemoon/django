@@ -1020,7 +1020,7 @@ class ModelAdmin(BaseModelAdmin):
         # Handle GET -- construct a formset for display.
         elif self.list_editable:
             FormSet = self.get_changelist_formset(request)
-            formset = exta["formset"] = FormSet(queryset=cl.queryset())
+            formset = extra["formset"] = FormSet(queryset=cl.queryset())
 
         # Build the list of media to be used by the formset.
         if formset:

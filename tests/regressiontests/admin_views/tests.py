@@ -193,7 +193,10 @@ class AdminViewBasicTest(TestCase):
         )
 
     def testLimitedFilter(self):
-        """Ensure admin changelist filters do not contain objects excluded via limit_choices_to."""
+        """
+        Ensure admin changelist filters do not contain objects excluded via
+        limit_choices_to.
+        """
         response = self.client.get('/test_admin/%s/admin_views/thing/' % self.urlbit)
         self.failUnlessEqual(response.status_code, 200)
         self.failUnless(
@@ -622,7 +625,7 @@ class AdminViewStringPrimaryKeyTest(TestCase):
         response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/%s/history/' % quote(self.pk))
         self.assertContains(response, escape(self.pk))
         self.failUnlessEqual(response.status_code, 200)
- 
+
     def test_get_change_view(self):
         "Retrieving the object using urlencoded form of primary key should work"
         response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/%s/' % quote(self.pk))

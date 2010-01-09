@@ -127,7 +127,7 @@ class ChangeList(object):
     def get_ordering(self):
         ordering_field = self.request.GET.get(ORDER_VAR)
         if not ordering_field:
-            ordering_field = self.opts.ordering or "-%s" % self.opts.pk.name
+            ordering_field = (self.opts.ordering and self.opts.ordering[0]) or "-%s" % self.opts.pk.name
 
         direction = ""
         if ordering_field[0] == "-":
@@ -197,7 +197,7 @@ class AdminChangeList(ChangeList):
         filter_specs = []
         for f in self.list_filter:
             f = self.opts.get_field_by_name(f)[0]
-            spec = FilterSpec.create(f, self.request, self.request.GET, self.model)
+            spec = FilterSpec.create(f, self.request, self.request.GET, self.model, self)
             if spec and spec.has_output():
                 filter_specs.append(spec)
         return filter_specs
