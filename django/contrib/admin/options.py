@@ -5,7 +5,8 @@ from django.forms.models import BaseInlineFormSet
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin import widgets
 from django.contrib.admin import helpers
-from django.contrib.admin.util import unquote, flatten_fieldsets, get_deleted_objects, model_ngettext, model_format_dict
+from django.contrib.admin.util import (unquote, flatten_fieldsets,
+    get_deleted_objects, model_ngettext, model_format_dict)
 from django.contrib import messages
 from django.views.decorators.csrf import csrf_protect
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -366,8 +367,8 @@ class ModelAdmin(BaseModelAdmin):
         """
         Returns the ChangeList class for use on the changelist page.
         """
-        from django.contrib.admin.views.main import ChangeList
-        return ChangeList
+        from django.contrib.admin.changelist import AdminChangeList
+        return AdminChangeList
 
     def get_object(self, request, object_id):
         """

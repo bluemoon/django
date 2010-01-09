@@ -1,5 +1,6 @@
 import operator
 
+from django.contrib.admin.filterspecs import FilterSpec
 from django.contrib.admin.options import IncorrectLookupParameters
 from django.core.pagination import Paginator, EmptyPage, InvalidPage
 from django.db.models import ManyToOneRel, FieldDoesNotExist, Q
@@ -146,3 +147,15 @@ class ChangeList(object):
     @cached_attr
     def count(self):
         return self.queryset().count()
+
+
+class AdminChangeList(ChangeList):
+    @cached_attr
+    def get_filters(self):
+        filter_specs = []
+        for f in self.list_filter:
+            f = self.model._meta.get_field_by_name(f)[0]
+            spec = FilterSpec.create(f, self.request, self.request.GET, self.model)
+            if spec and spec.has_output():
+                filter_specs.append(spec)
+        return filter_specs
