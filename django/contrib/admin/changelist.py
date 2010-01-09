@@ -1,6 +1,7 @@
 import operator
 
 from django.contrib.admin.filterspecs import FilterSpec
+from django.contrib.admin.util import quote
 from django.core.paginator import Paginator, EmptyPage, InvalidPage
 from django.db.models import ManyToOneRel, FieldDoesNotExist, Q
 from django.utils.encoding import smart_str
@@ -18,6 +19,9 @@ ERROR_FLAG = 'e'
 
 META_FLAGS = (ALL_VAR, ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR,
     TO_FIELD_VAR, IS_POPUP_VAR, ERROR_FLAG)
+
+# Text to display within change-list table cells if the value is blank.
+EMPTY_CHANGELIST_VALUE = '(None)'
 
 class IncorrectLookupParameters(Exception):
     pass
@@ -58,7 +62,7 @@ class ChangeList(object):
         try:
             page = paginator.page(page+1)
         except (EmptyPage, InvalidPage):
-            page = paginator.page(0)
+            page = paginator.page(1)
         return page.object_list
 
     def apply_filters(self, qs):
@@ -176,3 +180,6 @@ class AdminChangeList(ChangeList):
             if spec and spec.has_output():
                 filter_specs.append(spec)
         return filter_specs
+
+    def url_for_result(self, result):
+        return "%s/" % quote(getattr(result, self.opts.pk.attname))

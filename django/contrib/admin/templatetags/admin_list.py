@@ -2,8 +2,8 @@ import datetime
 
 from django.conf import settings
 from django.contrib.admin.util import lookup_field, display_for_field, label_for_field
-from django.contrib.admin.views.main import ALL_VAR, EMPTY_CHANGELIST_VALUE
-from django.contrib.admin.views.main import ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR
+from django.contrib.admin.changelist import (ALL_VAR, EMPTY_CHANGELIST_VALUE,
+    ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR, TO_FIELD_VAR, IS_POPUP_VAR)
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.forms.forms import pretty_name
@@ -158,14 +158,14 @@ def items_for_result(cl, extra, result, form):
             url = cl.url_for_result(result)
             # Convert the pk to something that can be used in Javascript.
             # Problem cases are long ints (23L) and non-ASCII strings.
-            if cl.to_field:
-                attr = str(cl.to_field)
+            if cl.request.GET.get(TO_FIELD_VAR):
+                attr = str(cl.request.GET.get(TO_FIELD_VAR))
             else:
                 attr = pk
             value = result.serializable_value(attr)
             result_id = repr(force_unicode(value))[1:]
             yield mark_safe(u'<%s%s><a href="%s"%s>%s</a></%s>' % \
-                (table_tag, row_class, url, (cl.is_popup and ' onclick="opener.dismissRelatedLookupPopup(window, %s); return false;"' % result_id or ''), conditional_escape(result_repr), table_tag))
+                (table_tag, row_class, url, (IS_POPUP_VAR in cl.request.GET and ' onclick="opener.dismissRelatedLookupPopup(window, %s); return false;"' % result_id or ''), conditional_escape(result_repr), table_tag))
         else:
             # By default the fields come from ModelAdmin.list_editable, but if we pull
             # the fields out of the form instead of list_editable custom admins
