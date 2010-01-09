@@ -954,8 +954,16 @@ class ModelAdmin(BaseModelAdmin):
 
         ChangeList = self.get_changelist(request)
         try:
-            cl = ChangeList(request, self.model, list_display, self.list_display_links, self.list_filter,
-                self.date_hierarchy, self.search_fields, self.list_select_related, self.list_per_page, self.list_editable, self)
+            extra = {
+                "list_display_links": self.list_display_links,
+                "date_hierarchy": self.date_hierarchy,
+                "list_editable": self.list_editable,
+            }
+            cl = ChangeList(request, self.queryset(request), list_display,
+                self.list_filter, self.search_fields, self.list_select_related,
+                self.list_per_page, self.list_editable)
+            # Call queryset() so we get an exception here.
+            cl.queryset()
         except IncorrectLookupParameters:
             # Wacky lookup parameters were given, so redirect to the main
             # changelist page, without parameters, and pass an 'invalid=1'
@@ -963,7 +971,9 @@ class ModelAdmin(BaseModelAdmin):
             # the 'invalid=1' parameter was already in the query string, something
             # is screwed up with the database, so display an error page.
             if ERROR_FLAG in request.GET.keys():
-                return render_to_response('admin/invalid_setup.html', {'title': _('Database error')})
+                return render_to_response('admin/invalid_setup.html',{
+                    'title': _('Database error')
+                })
             return HttpResponseRedirect(request.path + '?' + ERROR_FLAG + '=1')
 
         # If the request was POSTed, this might be a bulk action or a bulk edit.
@@ -977,12 +987,13 @@ class ModelAdmin(BaseModelAdmin):
         # If we're allowing changelist editing, we need to construct a formset
         # for the changelist given all the fields to be edited. Then we'll
         # use the formset to validate/process POSTed data.
-        formset = cl.formset = None
+        formset = extra["formset"] = None
 
         # Handle POSTed bulk-edit data.
         if request.method == "POST" and self.list_editable:
             FormSet = self.get_changelist_formset(request)
-            formset = cl.formset = FormSet(request.POST, request.FILES, queryset=cl.result_list)
+            formset = extra["formset"] = FormSet(request.POST, request.FILES,
+                queryset=cl.queryset())
             if formset.is_valid():
                 changecount = 0
                 for form in formset.forms:
@@ -1011,7 +1022,7 @@ class ModelAdmin(BaseModelAdmin):
         # Handle GET -- construct a formset for display.
         elif self.list_editable:
             FormSet = self.get_changelist_formset(request)
-            formset = cl.formset = FormSet(queryset=cl.result_list)
+            formset = exta["formset"] = FormSet(queryset=cl.queryset())
 
         # Build the list of media to be used by the formset.
         if formset:
@@ -1026,15 +1037,20 @@ class ModelAdmin(BaseModelAdmin):
         else:
             action_form = None
 
-        if cl.result_count == 1:
+        if cl.count() == 1:
             module_name = force_unicode(opts.verbose_name)
         else:
             module_name = force_unicode(opts.verbose_name_plural)
 
+        is_popup = IS_POPUP_VAR in request.GET
+        if is_popup:
+            title = ugettext("Select %s") % force_unicode(self.model._meta.verbose_name)
+        else:
+            title = ugettext("Select %s to change") % force_unicode(self.model._meta.verbose_name)
         context = {
             'module_name': module_name,
-            'title': cl.title,
-            'is_popup': cl.is_popup,
+            'title': title,
+            'is_popup': IS_POPUP_VAR in request.GET,
             'cl': cl,
             'media': media,
             'has_add_permission': self.has_add_permission(request),
