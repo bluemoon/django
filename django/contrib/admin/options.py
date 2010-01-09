@@ -959,7 +959,7 @@ class ModelAdmin(BaseModelAdmin):
             }
             cl = ChangeList(request, self.queryset(request), list_display,
                 self.list_filter, self.search_fields, self.list_select_related,
-                self.list_per_page)
+                self.list_per_page, self)
             # Call queryset() so we get an exception here.
             cl.queryset()
         except IncorrectLookupParameters:

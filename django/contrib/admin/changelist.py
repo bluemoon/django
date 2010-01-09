@@ -160,6 +160,13 @@ class ChangeList(object):
             return 0
 
 class AdminChangeList(ChangeList):
+    def __init__(self, request, base_queryset, list_display, list_filter,
+        search_fields, list_select_related, list_per_page, model_admin):
+        super(AdminChangeList, self).__init__(request, base_queryset,
+            list_display, list_filter, search_fields, list_select_related,
+            list_per_page)
+        self.model_admin = model_admin
+
     @cached_attr
     def get_filters(self):
         filter_specs = []

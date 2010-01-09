@@ -57,7 +57,7 @@
     {% endif %}
     <div class="module{% if cl.get_filters %} filtered{% endif %}" id="changelist">
       {% block search %}{% search_form cl %}{% endblock %}
-      {% block date_hierarchy %}{% date_hierarchy cl %}{% endblock %}
+      {% block date_hierarchy %}{% date_hierarchy cl extra %}{% endblock %}
 
       {% block filters %}
         {% if cl.get_filters %}
@@ -75,7 +75,7 @@
 
       {% block result_list %}
           {% if action_form and actions_on_top and cl.full_count %}{% admin_actions %}{% endif %}
-          {% result_list cl %}
+          {% result_list cl extra %}
           {% if action_form and actions_on_bottom and cl.full_count %}{% admin_actions %}{% endif %}
       {% endblock %}
       {% block pagination %}{% pagination cl %}{% endblock %}

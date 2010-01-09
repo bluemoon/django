@@ -73,7 +73,7 @@ def pagination(cl):
 pagination = register.inclusion_tag('admin/pagination.html')(pagination)
 
 def result_headers(cl):
-    lookup_opts = cl.lookup_opts
+    lookup_opts = cl.opts
 
     for i, field_name in enumerate(cl.list_display):
         attr = None
@@ -116,9 +116,9 @@ def _boolean_icon(field_val):
     BOOLEAN_MAPPING = {True: 'yes', False: 'no', None: 'unknown'}
     return mark_safe(u'<img src="%simg/admin/icon-%s.gif" alt="%s" />' % (settings.ADMIN_MEDIA_PREFIX, BOOLEAN_MAPPING[field_val], field_val))
 
-def items_for_result(cl, result, form):
+def items_for_result(cl, extra, result, form):
     first = True
-    pk = cl.lookup_opts.pk.attname
+    pk = cl.opts.pk.attname
     for field_name in cl.list_display:
         row_class = ''
         try:
@@ -152,7 +152,7 @@ def items_for_result(cl, result, form):
         if force_unicode(result_repr) == '':
             result_repr = mark_safe('&nbsp;')
         # If list_display_links not defined, add the link tag to the first field
-        if (first and not cl.list_display_links) or field_name in cl.list_display_links:
+        if (first and not extra["list_display_links"]) or field_name in extra["list_display_links"]:
             table_tag = {True:'th', False:'td'}[first]
             first = False
             url = cl.url_for_result(result)
@@ -179,30 +179,30 @@ def items_for_result(cl, result, form):
     if form:
         yield mark_safe(force_unicode(form[cl.model._meta.pk.name]))
 
-def results(cl):
-    if cl.formset:
-        for res, form in zip(cl.result_list, cl.formset.forms):
-            yield list(items_for_result(cl, res, form))
+def results(cl, extra):
+    if extra["formset"]:
+        for res, form in zip(cl.queryset(), extra["formset"].forms):
+            yield list(items_for_result(cl, extra, res, form))
     else:
-        for res in cl.result_list:
-            yield list(items_for_result(cl, res, None))
+        for res in cl.queryset():
+            yield list(items_for_result(cl, extra, res, None))
 
-def result_list(cl):
+def result_list(cl, extra):
     return {'cl': cl,
             'result_headers': list(result_headers(cl)),
-            'results': list(results(cl))}
+            'results': list(results(cl, extra))}
 result_list = register.inclusion_tag("admin/change_list_results.html")(result_list)
 
-def date_hierarchy(cl):
-    if cl.date_hierarchy:
-        field_name = cl.date_hierarchy
+def date_hierarchy(cl, extra):
+    if extra["date_hierarchy"]:
+        field_name = extra["date_hierarchy"]
         year_field = '%s__year' % field_name
         month_field = '%s__month' % field_name
         day_field = '%s__day' % field_name
         field_generic = '%s__' % field_name
-        year_lookup = cl.params.get(year_field)
-        month_lookup = cl.params.get(month_field)
-        day_lookup = cl.params.get(day_field)
+        year_lookup = cl.request.GET.get(year_field)
+        month_lookup = cl.request.GET.get(month_field)
+        day_lookup = cl.request.GET.get(day_field)
 
         link = lambda d: cl.get_query_string(d, [field_generic])
 
@@ -217,7 +217,7 @@ def date_hierarchy(cl):
                 'choices': [{'title': capfirst(formats.date_format(day, 'MONTH_DAY_FORMAT'))}]
             }
         elif year_lookup and month_lookup:
-            days = cl.query_set.filter(**{year_field: year_lookup, month_field: month_lookup}).dates(field_name, 'day')
+            days = cl.queryset().filter(**{year_field: year_lookup, month_field: month_lookup}).dates(field_name, 'day')
             return {
                 'show': True,
                 'back': {
@@ -230,7 +230,7 @@ def date_hierarchy(cl):
                 } for day in days]
             }
         elif year_lookup:
-            months = cl.query_set.filter(**{year_field: year_lookup}).dates(field_name, 'month')
+            months = cl.queryset().filter(**{year_field: year_lookup}).dates(field_name, 'month')
             return {
                 'show' : True,
                 'back': {
@@ -243,7 +243,7 @@ def date_hierarchy(cl):
                 } for month in months]
             }
         else:
-            years = cl.query_set.dates(field_name, 'year')
+            years = cl.queryset().dates(field_name, 'year')
             return {
                 'show': True,
                 'choices': [{
