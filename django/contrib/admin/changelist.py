@@ -2,7 +2,7 @@ import operator
 
 from django.contrib.admin.filterspecs import FilterSpec
 from django.contrib.admin.options import IncorrectLookupParameters
-from django.core.pagination import Paginator, EmptyPage, InvalidPage
+from django.core.paginator import Paginator, EmptyPage, InvalidPage
 from django.db.models import ManyToOneRel, FieldDoesNotExist, Q
 from django.utils.encoding import smart_str
 from django.utils.functional import cached_attr
