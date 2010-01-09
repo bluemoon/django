@@ -472,8 +472,8 @@ class Gadget(models.Model):
 
 class CustomChangeList(AdminChangeList):
     #@cached_attr
-    def queryset(self):
-        return super(CustomChangeList, self).queryset().filter(pk=9999)
+    def unlimited_queryset(self):
+        return super(CustomChangeList, self).unlimited_queryset().filter(pk=9999)
 
 class GadgetAdmin(admin.ModelAdmin):
     def get_changelist(self, request, **kwargs):
