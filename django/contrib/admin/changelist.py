@@ -6,6 +6,7 @@ from django.core.paginator import Paginator, EmptyPage, InvalidPage
 from django.db.models import ManyToOneRel, FieldDoesNotExist, Q
 from django.utils.encoding import smart_str
 from django.utils.functional import cached_attr
+from django.utils.http import urlencode
 
 
 ALL_VAR = 'all'
@@ -22,6 +23,11 @@ META_FLAGS = (ALL_VAR, ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR,
 
 # Text to display within change-list table cells if the value is blank.
 EMPTY_CHANGELIST_VALUE = '(None)'
+
+# The system will display a "Show all" link on the change list only if the
+# total result count is less than or equal to this setting.
+MAX_SHOW_ALL_ALLOWED = 200
+
 
 class IncorrectLookupParameters(Exception):
     pass
@@ -40,7 +46,7 @@ class ChangeList(object):
         self.list_per_page = list_per_page
 
     @cached_attr
-    def queryset(self):
+    def unlimited_queryset(self):
         qs = self.apply_filters(self.base_queryset)
         qs = self.apply_search(qs)
         qs = self.apply_order_by(qs)
@@ -57,10 +63,18 @@ class ChangeList(object):
                             break
                     except FieldDoesNotExist:
                         pass
+        return qs
+
+    @cached_attr
+    def paginator(self):
+        return Paginator(self.unlimited_queryset(), self.list_per_page)
+
+    @cached_attr
+    def queryset(self):
         page = self.get_page_num()
-        paginator = Paginator(qs, self.list_per_page)
+        paginator = self.paginator()
         try:
-            page = paginator.page(page+1)
+            page = paginator.page(page)
         except (EmptyPage, InvalidPage):
             page = paginator.page(1)
         return page.object_list
@@ -110,17 +124,17 @@ class ChangeList(object):
                     break
         return qs
 
-    def apply_order_by(self, qs):
-        ordering = ordering_field = self.request.GET.get(ORDER_VAR)
-        if not ordering:
-            return qs
+    def get_ordering(self):
+        ordering_field = self.request.GET.get(ORDER_VAR)
+        if not ordering_field:
+            ordering_field = self.opts.ordering or "-%s" % self.opts.pk.name
 
         direction = ""
-        if ordering[0] == "-":
-            ordering = ordering[1:]
+        if ordering_field[0] == "-":
+            ordering_field = ordering_field[1:]
             direction = "-"
         try:
-            field_name = self.list_display[int(ordering)]
+            field_name = self.list_display[int(ordering_field)]
             try:
                 ordering_field = self.opts.get_field_by_name(field_name)[0].name
             except FieldDoesNotExist:
@@ -138,9 +152,13 @@ class ChangeList(object):
         if ORDER_TYPE_VAR in self.request.GET:
             direction = {
                 "asc": "",
+                "dsc": "-",
                 "desc": "-",
             }[self.request.GET[ORDER_TYPE_VAR]]
+        return ordering_field, direction
 
+    def apply_order_by(self, qs):
+        ordering_field, direction = self.get_ordering()
         return qs.order_by("%s%s" % (direction, ordering_field))
 
     @cached_attr
@@ -159,9 +177,12 @@ class ChangeList(object):
 
     def get_page_num(self):
         try:
-            return int(self.request.GET.get(PAGE_VAR, 0))
+            return int(self.request.GET.get(PAGE_VAR, 0)) + 1
         except ValueError:
-            return 0
+            return 1
+
+    def multi_page(self):
+        return self.count() > self.list_per_page
 
 class AdminChangeList(ChangeList):
     def __init__(self, request, base_queryset, list_display, list_filter,
@@ -180,6 +201,24 @@ class AdminChangeList(ChangeList):
             if spec and spec.has_output():
                 filter_specs.append(spec)
         return filter_specs
+
+    def get_query_string(self, new_params=None, remove=None):
+        if new_params is None:
+            new_params = {}
+        if remove is None:
+            remove = []
+        p = self.request.GET.copy()
+        for r in remove:
+            for k in p.keys():
+                if k.startswith(r):
+                    del p[k]
+        for k, v in new_params.items():
+            if v is None:
+                if k in p:
+                    del p[k]
+            else:
+                p[k] = v
+        return '?%s' % urlencode(p)
 
     def url_for_result(self, result):
         return "%s/" % quote(getattr(result, self.opts.pk.attname))

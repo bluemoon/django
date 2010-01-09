@@ -978,7 +978,7 @@ class ModelAdmin(BaseModelAdmin):
         # Try to look up an action first, but if this isn't an action the POST
         # will fall through to the bulk edit check, below.
         if actions and request.method == 'POST':
-            response = self.response_action(request, queryset=cl.get_query_set())
+            response = self.response_action(request, queryset=cl.unlimited_queryset())
             if response:
                 return response
 

@@ -3,7 +3,8 @@ import datetime
 from django.conf import settings
 from django.contrib.admin.util import lookup_field, display_for_field, label_for_field
 from django.contrib.admin.changelist import (ALL_VAR, EMPTY_CHANGELIST_VALUE,
-    ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR, TO_FIELD_VAR, IS_POPUP_VAR)
+    ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR, TO_FIELD_VAR, IS_POPUP_VAR,
+    MAX_SHOW_ALL_ALLOWED)
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.forms.forms import pretty_name
@@ -30,9 +31,9 @@ def paginator_number(cl,i):
 paginator_number = register.simple_tag(paginator_number)
 
 def pagination(cl):
-    paginator, page_num = cl.paginator, cl.page_num
+    paginator, page_num = cl.paginator(), cl.get_page_num()
 
-    pagination_required = (not cl.show_all or not cl.can_show_all) and cl.multi_page
+    pagination_required = (ALL_VAR not in cl.request.GET or not cl.count() <= MAX_SHOW_ALL_ALLOWED) and cl.multi_page()
     if not pagination_required:
         page_range = []
     else:
@@ -61,7 +62,7 @@ def pagination(cl):
             else:
                 page_range.extend(range(page_num + 1, paginator.num_pages))
 
-    need_show_all_link = cl.can_show_all and not cl.show_all and cl.multi_page
+    need_show_all_link = cl.count() <= MAX_SHOW_ALL_ALLOWED and not ALL_VAR not in cl.request.GET and cl.multi_page()
     return {
         'cl': cl,
         'pagination_required': pagination_required,
@@ -101,9 +102,13 @@ def result_headers(cl):
 
         th_classes = []
         new_order_type = 'asc'
-        if field_name == cl.order_field or admin_order_field == cl.order_field:
-            th_classes.append('sorted %sending' % cl.order_type.lower())
-            new_order_type = {'asc': 'desc', 'desc': 'asc'}[cl.order_type.lower()]
+        if field_name == cl.get_ordering()[0] or admin_order_field == cl.get_ordering()[0]:
+            order_type = {
+                "": "asc",
+                "-": "desc",
+            }[cl.get_ordering()[1]]
+            th_classes.append('sorted %sending' % order_type)
+            new_order_type = {'asc': 'desc', 'desc': 'asc'}[order_type]
 
         yield {
             "text": header,
