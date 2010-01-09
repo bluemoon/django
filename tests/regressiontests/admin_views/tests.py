@@ -940,7 +940,8 @@ class AdminViewListEditable(TestCase):
             "form-1-gender": "1",
             "form-1-alive": "checked",
         }
-        self.client.post('/test_admin/admin/admin_views/person/?gender__exact=1', data)
+        response = self.client.post('/test_admin/admin/admin_views/person/?gender__exact=1', data)
+        self.assertEqual(response.status_code, 302)
 
         self.failUnlessEqual(Person.objects.get(name="John Mauchly").alive, True)
 

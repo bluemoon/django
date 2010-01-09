@@ -80,7 +80,7 @@ class ChangeList(object):
         return page.object_list
 
     def apply_filters(self, qs):
-        lookup_params = self.request.GET.copy()
+        lookup_params = dict(self.request.GET.copy().items())
         for i in META_FLAGS:
             if i in lookup_params:
                 lookup_params.pop(i)

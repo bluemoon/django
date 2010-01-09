@@ -5,7 +5,7 @@ import os
 
 from django.contrib import admin
 from django.core.files.storage import FileSystemStorage
-from django.contrib.admin.views.main import ChangeList
+from django.contrib.admin.changelist import AdminChangeList
 from django.core.mail import EmailMessage
 from django.db import models
 
@@ -470,9 +470,10 @@ class Gadget(models.Model):
     def __unicode__(self):
         return self.name
 
-class CustomChangeList(ChangeList):
-    def get_query_set(self):
-        return self.root_query_set.filter(pk=9999) # Does not exist
+class CustomChangeList(AdminChangeList):
+    #@cached_attr
+    def queryset(self):
+        return super(CustomChangeList, self).queryset().filter(pk=9999)
 
 class GadgetAdmin(admin.ModelAdmin):
     def get_changelist(self, request, **kwargs):
