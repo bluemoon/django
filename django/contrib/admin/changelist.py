@@ -1,7 +1,6 @@
 import operator
 
 from django.contrib.admin.filterspecs import FilterSpec
-from django.contrib.admin.options import IncorrectLookupParameters
 from django.core.paginator import Paginator, EmptyPage, InvalidPage
 from django.db.models import ManyToOneRel, FieldDoesNotExist, Q
 from django.utils.encoding import smart_str
@@ -20,6 +19,8 @@ ERROR_FLAG = 'e'
 META_FLAGS = (ALL_VAR, ORDER_VAR, ORDER_TYPE_VAR, PAGE_VAR, SEARCH_VAR,
     TO_FIELD_VAR, IS_POPUP_VAR, ERROR_FLAG)
 
+class IncorrectLookupParameters(Exception):
+    pass
 
 class ChangeList(object):
     def __init__(self, request, base_queryset, list_display, list_filter,
@@ -55,7 +56,7 @@ class ChangeList(object):
         page = self.get_page_num()
         paginator = Paginator(qs, self.list_per_page)
         try:
-            page = paginator.page(page)
+            page = paginator.page(page+1)
         except (EmptyPage, InvalidPage):
             page = paginator.page(0)
         return page.object_list
@@ -63,7 +64,8 @@ class ChangeList(object):
     def apply_filters(self, qs):
         lookup_params = self.request.GET.copy()
         for i in META_FLAGS:
-            lookup_params.pop(i)
+            if i in lookup_params:
+                lookup_params.pop(i)
 
         for key, val in lookup_params.iteritems():
             if not isinstance(key, str):
@@ -79,9 +81,6 @@ class ChangeList(object):
             # Naked except because we're idiot developers, and you the user
             # clearly know better.  Ingrates.
             raise IncorrectLookupParameters
-    @property
-    def query(self):
-        return self.request.GET.get(SEARCH_VAR, "")
 
     def apply_search(self, qs):
         def construct_search(field_name):
@@ -150,6 +149,15 @@ class ChangeList(object):
     def count(self):
         return self.queryset().count()
 
+    @property
+    def query(self):
+        return self.request.GET.get(SEARCH_VAR, "")
+
+    def get_page_num(self):
+        try:
+            return int(self.request.GET.get(PAGE_VAR, 0))
+        except ValueError:
+            return 0
 
 class AdminChangeList(ChangeList):
     @cached_attr

@@ -5,6 +5,7 @@ from django.forms.models import BaseInlineFormSet
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin import widgets
 from django.contrib.admin import helpers
+from django.contrib.admin.changelist import IncorrectLookupParameters, IS_POPUP_VAR
 from django.contrib.admin.util import (unquote, flatten_fieldsets,
     get_deleted_objects, model_ngettext, model_format_dict)
 from django.contrib import messages
@@ -31,9 +32,6 @@ except NameError:
 HORIZONTAL, VERTICAL = 1, 2
 # returns the <ul> class for a given radio_admin field
 get_ul_class = lambda x: 'radiolist%s' % ((x == HORIZONTAL) and ' inline' or '')
-
-class IncorrectLookupParameters(Exception):
-    pass
 
 # Defaults for formfield_overrides. ModelAdmin subclasses can change this
 # by adding to ModelAdmin.formfield_overrides.
@@ -961,7 +959,7 @@ class ModelAdmin(BaseModelAdmin):
             }
             cl = ChangeList(request, self.queryset(request), list_display,
                 self.list_filter, self.search_fields, self.list_select_related,
-                self.list_per_page, self.list_editable)
+                self.list_per_page)
             # Call queryset() so we get an exception here.
             cl.queryset()
         except IncorrectLookupParameters:
@@ -1044,9 +1042,9 @@ class ModelAdmin(BaseModelAdmin):
 
         is_popup = IS_POPUP_VAR in request.GET
         if is_popup:
-            title = ugettext("Select %s") % force_unicode(self.model._meta.verbose_name)
+            title = _("Select %s") % force_unicode(self.model._meta.verbose_name)
         else:
-            title = ugettext("Select %s to change") % force_unicode(self.model._meta.verbose_name)
+            title = _("Select %s to change") % force_unicode(self.model._meta.verbose_name)
         context = {
             'module_name': module_name,
             'title': title,
