@@ -26,6 +26,7 @@ class ChangeList(object):
         search_fields, list_select_related, list_per_page):
         self.request = request
         self.model = base_queryset.model
+        self.opts = self.model._meta
         self.base_queryset = base_queryset
         self.list_display = list_display
         self.list_filter = list_filter
@@ -45,7 +46,7 @@ class ChangeList(object):
             else:
                 for field in self.list_display:
                     try:
-                        f = self.model._meta.get_field_by_name(field)[0]
+                        f = self.opts.get_field_by_name(field)[0]
                         if isinstance(f.rel, ManyToOneRel):
                             qs = qs.select_related()
                             break
@@ -117,7 +118,7 @@ class ChangeList(object):
         try:
             field_name = self.list_display[int(ordering)]
             try:
-                ordering_field = self.model._meta.get_field_by_name(field_name)[0].name
+                ordering_field = self.opts.get_field_by_name(field_name)[0].name
             except FieldDoesNotExist:
                 try:
                     if callable(field_name):
@@ -154,7 +155,7 @@ class AdminChangeList(ChangeList):
     def get_filters(self):
         filter_specs = []
         for f in self.list_filter:
-            f = self.model._meta.get_field_by_name(f)[0]
+            f = self.opts.get_field_by_name(f)[0]
             spec = FilterSpec.create(f, self.request, self.request.GET, self.model)
             if spec and spec.has_output():
                 filter_specs.append(spec)

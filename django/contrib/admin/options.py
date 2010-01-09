@@ -1052,6 +1052,7 @@ class ModelAdmin(BaseModelAdmin):
             'title': title,
             'is_popup': IS_POPUP_VAR in request.GET,
             'cl': cl,
+            'extra': extra,
             'media': media,
             'has_add_permission': self.has_add_permission(request),
             'root_path': self.admin_site.root_path,
