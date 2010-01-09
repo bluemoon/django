@@ -21,7 +21,7 @@ register = Library()
 
 DOT = '.'
 
-def paginator_number(cl,i):
+def paginator_number(cl, i):
     if i == DOT:
         return u'... '
     elif i == cl.page_num:
@@ -30,7 +30,7 @@ def paginator_number(cl,i):
         return mark_safe(u'<a href="%s"%s>%d</a> ' % (escape(cl.get_query_string({PAGE_VAR: i})), (i == cl.paginator.num_pages-1 and ' class="end"' or ''), i+1))
 paginator_number = register.simple_tag(paginator_number)
 
-def pagination(cl):
+def pagination(cl, extra):
     paginator, page_num = cl.paginator(), cl.get_page_num()
 
     pagination_required = (ALL_VAR not in cl.request.GET or not cl.count() <= MAX_SHOW_ALL_ALLOWED) and cl.multi_page()
@@ -70,6 +70,7 @@ def pagination(cl):
         'page_range': page_range,
         'ALL_VAR': ALL_VAR,
         '1': 1,
+        'extra': extra,
     }
 pagination = register.inclusion_tag('admin/pagination.html')(pagination)
 
@@ -172,9 +173,9 @@ def items_for_result(cl, extra, result, form):
             yield mark_safe(u'<%s%s><a href="%s"%s>%s</a></%s>' % \
                 (table_tag, row_class, url, (IS_POPUP_VAR in cl.request.GET and ' onclick="opener.dismissRelatedLookupPopup(window, %s); return false;"' % result_id or ''), conditional_escape(result_repr), table_tag))
         else:
-            # By default the fields come from ModelAdmin.list_editable, but if we pull
-            # the fields out of the form instead of list_editable custom admins
-            # can provide fields on a per request basis
+            # By default the fields come from ModelAdmin.list_editable, but if
+            # we pull the fields out of the form instead of list_editable
+            # custom admins can provide fields on a per request basis
             if form and field_name in form.fields:
                 bf = form[field_name]
                 result_repr = mark_safe(force_unicode(bf.errors) + force_unicode(bf))
