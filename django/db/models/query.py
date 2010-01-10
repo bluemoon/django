@@ -185,7 +185,7 @@ class QuerySet(object):
             qs.query.set_limits(k, k + 1)
             return list(qs)[0]
         except self.model.DoesNotExist, e:
-            raise IndexError, e.args
+            raise IndexError(e.args)
 
     def __and__(self, other):
         self._merge_sanity_check(other)
@@ -1088,6 +1088,12 @@ class EmptyQuerySet(QuerySet):
         Always returns EmptyQuerySet.
         """
         return self
+
+    def update(self, **kwargs):
+        """
+        Don't update anything.
+        """
+        return 0
 
     # EmptyQuerySet is always an empty result in where-clauses (and similar
     # situations).

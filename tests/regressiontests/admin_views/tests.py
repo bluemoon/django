@@ -605,6 +605,19 @@ class AdminViewPermissionsTest(TestCase):
         self.failUnlessEqual(logged.object_id, u'1')
         self.client.get('/test_admin/admin/logout/')
 
+    def testDisabledPermissionsWhenLoggedIn(self):
+        self.client.login(username='super', password='secret')
+        superuser = User.objects.get(username='super')
+        superuser.is_active = False
+        superuser.save()
+
+        response = self.client.get('/test_admin/admin/')
+        self.assertContains(response, 'id="login-form"')
+        self.assertNotContains(response, 'Log out')
+
+        response = self.client.get('/test_admin/admin/secure-view/')
+        self.assertContains(response, 'id="login-form"')
+
 class AdminViewStringPrimaryKeyTest(TestCase):
     fixtures = ['admin-views-users.xml', 'string-primary-key.xml']
 
