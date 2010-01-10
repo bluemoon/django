@@ -565,6 +565,9 @@ class CharField(Field):
             return value
         return smart_unicode(value)
 
+    def get_prep_value(self, value):
+        return self.to_python(value)
+    
     def formfield(self, **kwargs):
         # Passing max_length to forms.CharField means that the value's length
         # will be validated twice. This is considered acceptable since we want
@@ -1006,6 +1009,11 @@ class TextField(Field):
     def get_internal_type(self):
         return "TextField"
 
+    def get_prep_value(self, value):
+        if isinstance(value, basestring) or value is None:
+            return value
+        return smart_unicode(value)
+
     def formfield(self, **kwargs):
         defaults = {'widget': forms.Textarea}
         defaults.update(kwargs)
@@ -1036,7 +1044,7 @@ class TimeField(Field):
             # Not usually a good idea to pass in a datetime here (it loses
             # information), but this can be a side-effect of interacting with a
             # database backend (e.g. Oracle), so we'll be accommodating.
-            return value.time
+            return value.time()
 
         # Attempt to parse a datetime:
         value = smart_str(value)

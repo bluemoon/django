@@ -250,38 +250,52 @@ def lookup_field(name, obj, model_admin=None):
         value = getattr(obj, f.attname)
     return f, attr, value
 
-def label_for_field(name, model, model_admin):
+def label_for_field(name, model, model_admin=None, return_attr=False):
+    attr = None
     try:
-        return model._meta.get_field_by_name(name)[0].verbose_name
+        label = model._meta.get_field_by_name(name)[0].verbose_name
     except models.FieldDoesNotExist:
         if name == "__unicode__":
-            return force_unicode(model._meta.verbose_name)
-        if name == "__str__":
-            return smart_str(model._meta.verbose_name)
-        if callable(name):
-            attr = name
-        elif hasattr(model_admin, name):
-            attr = getattr(model_admin, name)
-        elif hasattr(model, name):
-            attr = getattr(model, name)
+            label = force_unicode(model._meta.verbose_name)
+        elif name == "__str__":
+            label = smart_str(model._meta.verbose_name)
         else:
-            raise AttributeError
-
-        if hasattr(attr, "short_description"):
-            return attr.short_description
-        elif callable(attr):
-            if attr.__name__ == "<lambda>":
-                return "--"
+            if callable(name):
+                attr = name
+            elif model_admin is not None and hasattr(model_admin, name):
+                attr = getattr(model_admin, name)
+            elif hasattr(model, name):
+                attr = getattr(model, name)
             else:
-                return attr.__name__
-        else:
-            return name
+                message = "Unable to lookup '%s' on %s" % (name, model._meta.object_name)
+                if model_admin:
+                    message += " or %s" % (model_admin.__name__,)
+                raise AttributeError(message)
+
+            if hasattr(attr, "short_description"):
+                label = attr.short_description
+            elif callable(attr):
+                if attr.__name__ == "<lambda>":
+                    label = "--"
+                else:
+                    label = attr.__name__
+            else:
+                label = name
+    if return_attr:
+        return (label, attr)
+    else:
+        return label
 
 
 def display_for_field(value, field):
     from django.contrib.admin.templatetags.admin_list import _boolean_icon
     from django.contrib.admin.views.main import EMPTY_CHANGELIST_VALUE
-    if isinstance(field, models.DateField) or isinstance(field, models.TimeField):
+
+    if field.flatchoices:
+        return dict(field.flatchoices).get(value, EMPTY_CHANGELIST_VALUE)
+    elif value is None:
+        return EMPTY_CHANGELIST_VALUE
+    elif isinstance(field, models.DateField) or isinstance(field, models.TimeField):
         return formats.localize(value)
     elif isinstance(field, models.BooleanField) or isinstance(field, models.NullBooleanField):
         return _boolean_icon(value)
@@ -289,7 +303,5 @@ def display_for_field(value, field):
         return formats.number_format(value, field.decimal_places)
     elif isinstance(field, models.FloatField):
         return formats.number_format(value)
-    elif field.flatchoices:
-        return dict(field.flatchoices).get(value, EMPTY_CHANGELIST_VALUE)
     else:
         return smart_unicode(value)

@@ -380,7 +380,7 @@ If :setting:`TEMPLATE_CONTEXT_PROCESSORS` contains this processor, every
 .. versionchanged:: 1.2
    Prior to version 1.2, the ``messages`` variable was a lazy accessor for
    ``user.get_and_delete_messages()``. It has been changed to include any
-   messages added via the :ref:`messages framework <ref-contrib-messages`.
+   messages added via the :ref:`messages framework <ref-contrib-messages>`.
 
 django.core.context_processors.debug
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -656,7 +656,8 @@ returns the resulting string::
 
 The ``render_to_string`` shortcut takes one required argument --
 ``template_name``, which should be the name of the template to load
-and render -- and two optional arguments:
+and render (or a list of template names, in which case Django will use
+the first template in the list that exists) -- and two optional arguments:
 
     dictionary
         A dictionary to be used as variables and values for the
