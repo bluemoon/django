@@ -90,7 +90,6 @@ def django_tests(verbosity, interactive, failfast, test_labels):
     from django.conf import settings
 
     old_installed_apps = settings.INSTALLED_APPS
-    old_test_database_name = settings.TEST_DATABASE_NAME
     old_root_urlconf = getattr(settings, "ROOT_URLCONF", "")
     old_template_dirs = settings.TEMPLATE_DIRS
     old_use_i18n = settings.USE_I18N
@@ -163,7 +162,7 @@ def django_tests(verbosity, interactive, failfast, test_labels):
     failures = test_runner(test_labels, verbosity=verbosity, interactive=interactive, failfast=failfast,
                            extra_tests=extra_tests)
     if failures:
-        sys.exit(failures)
+        sys.exit(bool(failures))
 
     # Restore the old settings.
     settings.INSTALLED_APPS = old_installed_apps

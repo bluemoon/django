@@ -27,20 +27,58 @@ The keyword arguments are simply the names of the fields you've defined on your
 model. Note that instantiating a model in no way touches your database; for
 that, you need to ``save()``.
 
+.. _validating-objects:
+
+Validating objects
+==================
+
+.. versionadded:: 1.2
+
+To validate your model, call its ``full_validate()`` method:
+
+.. method:: Model.full_validate([exclude=[]])
+
+The optional ``exclude`` argument can contain a list of field names to omit
+when validating. This method raises ``ValidationError`` containing a
+message dictionary with errors from all fields.
+
+To add your own validation logic, override the supplied ``validate()`` method:
+
+Note that ``full_validate`` will NOT be called automatically when you call
+your model's ``save()`` method. You'll need to call it manually if you want
+to run your model validators. (This is for backwards compatibility.) However,
+if you're using a ``ModelForm``, it will call ``full_validate`` for you and
+will present any errors along with the other form error messages.
+
+.. method:: Model.validate()
+
+The ``validate()`` method on ``Model`` by default checks for uniqueness of
+fields and group of fields that are declared to be unique, so remember to call
+``self.validate_unique()`` or the superclass' ``validate`` method if you want
+this validation to run.
+
+Any ``ValidationError`` raised in this method will be included in the
+``message_dict`` under ``NON_FIELD_ERRORS``.
+
 Saving objects
 ==============
 
 To save an object back to the database, call ``save()``:
 
-.. method:: Model.save([force_insert=False, force_update=False])
-
-Of course, there are some subtleties; see the sections below.
+.. method:: Model.save([force_insert=False, force_update=False, using=DEFAULT_DB_ALIAS])
 
 .. versionadded:: 1.0
+   The ``force_insert`` and ``force_update`` arguments were added.
 
-The signature of the ``save()`` method has changed from earlier versions
-(``force_insert`` and ``force_update`` have been added). If you are overriding
-these methods, be sure to use the correct signature.
+.. versionadded:: 1.2
+   The ``using`` argument was added.
+
+If you want customized saving behavior, you can override this
+``save()`` method. See :ref:`overriding-model-methods` for more
+details.
+
+The model save process also has some subtleties; see the sections
+below.
 
 Auto-incrementing primary keys
 ------------------------------
@@ -231,14 +269,21 @@ For more details, see the documentation on :ref:`F() expressions
 Deleting objects
 ================
 
-.. method:: Model.delete()
+.. method:: Model.delete([using=DEFAULT_DB_ALIAS])
 
-   Issues a SQL ``DELETE`` for the object. This only deletes the object in the
-   database; the Python instance will still be around, and will still have data
-   in its fields.
+.. versionadded:: 1.2
+   The ``using`` argument was added.
 
-   For more details, including how to delete objects in bulk, see
-   :ref:`topics-db-queries-delete`.
+Issues a SQL ``DELETE`` for the object. This only deletes the object
+in the database; the Python instance will still be around, and will
+still have data in its fields.
+
+For more details, including how to delete objects in bulk, see
+:ref:`topics-db-queries-delete`.
+
+If you want customized deletion behavior, you can override this
+``delete()`` method. See :ref:`overriding-model-methods` for more
+details.
 
 .. _model-instance-methods:
 

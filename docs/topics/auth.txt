@@ -34,7 +34,7 @@ Authentication support is bundled as a Django application in
 
     1. Put ``'django.contrib.auth'`` and ``'django.contrib.contenttypes'`` in
        your :setting:`INSTALLED_APPS` setting.
-       (The :class:`~django.contrib.auth.models.Permisson` model in
+       (The :class:`~django.contrib.auth.models.Permission` model in
        :mod:`django.contrib.auth` depends on :mod:`django.contrib.contenttypes`.)
     2. Run the command ``manage.py syncdb``.
 
@@ -97,14 +97,20 @@ Fields
     .. attribute:: models.User.is_active
 
         Boolean. Designates whether this user account should be considered
-        active. Set this flag to ``False`` instead of deleting accounts.
+        active. We recommend that you set this flag to ``False`` instead of
+        deleting accounts; that way, if your applications have any foreign keys
+        to users, the foreign keys won't break.
 
-        This doesn't control whether or not the user can log in. Nothing in the
-        authentication path checks the ``is_active`` flag, so if you want to
-        reject a login based on ``is_active`` being ``False``, it is up to you
-        to check that in your own login view. However, permission checking
-        using the methods like :meth:`~models.User.has_perm` does check this
-        flag and will always return ``False`` for inactive users.
+        This doesn't necessarily control whether or not the user can log in.
+        Authentication backends aren't required to check for the ``is_active``
+        flag, so if you want to reject a login based on ``is_active`` being
+        ``False``, it's up to you to check that in your own login view.
+        However, the :class:`~django.contrib.auth.forms.AuthenticationForm`
+        used by the :func:`~django.contrib.auth.views.login` view *does*
+        perform this check, as do the permission-checking methods such as
+        :meth:`~models.User.has_perm` and the authentication in the Django
+        admin. All of those functions/methods will return ``False`` for
+        inactive users.
 
     .. attribute:: models.User.is_superuser
 
@@ -225,8 +231,9 @@ Methods
     .. method:: models.User.has_perm(perm, obj=None)
 
         Returns ``True`` if the user has the specified permission, where perm is
-        in the format ``"<app label>.<permission codename>"``.
-        If the user is inactive, this method will always return ``False``.
+        in the format ``"<app label>.<permission codename>"``. (see
+        `permissions`_ section below). If the user is inactive, this method will
+        always return ``False``.
 
         .. versionadded:: 1.2
 
@@ -1030,7 +1037,7 @@ checks to make sure the user is logged in and has the permission
 ``polls.can_vote``::
 
     def my_view(request):
-        if not (request.user.is_authenticated() and request.user.has_perm('polls.can_vote')):
+        if not request.user.has_perm('polls.can_vote'):
             return HttpResponse("You can't vote in this poll.")
         # ...
 
@@ -1122,6 +1129,8 @@ generic view itself. For example::
     def limited_object_detail(*args, **kwargs):
         return object_detail(*args, **kwargs)
 
+.. _permissions:
+
 Permissions
 ===========
 
@@ -1163,6 +1172,14 @@ will be created for all previously-installed models, as well as for any new
 models being installed at that time. Afterward, it will create default
 permissions for new models each time you run :djadmin:`manage.py syncdb
 <syncdb>`.
+
+Assuming you have an application with an
+:attr:`~django.db.models.Options.app_label` ``foo`` and a model named ``Bar``,
+to test for basic permissions you should use:
+
+    * add: ``user.has_perm('foo.add_bar')``
+    * change: ``user.has_perm('foo.change_bar')``
+    * delete: ``user.has_perm('foo.delete_bar')``
 
 .. _custom-permissions:
 

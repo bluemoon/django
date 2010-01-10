@@ -29,6 +29,11 @@ class BackendTest(TestCase):
         user.is_superuser = False
         user.save()
         self.assertEqual(user.has_perm('auth.test'), False)
+        user.is_staff = True
+        user.is_superuser = True
+        user.is_active = False
+        user.save()
+        self.assertEqual(user.has_perm('auth.test'), False)
 
     def test_custom_perms(self):
         user = User.objects.get(username='test')
@@ -68,6 +73,21 @@ class BackendTest(TestCase):
         user = AnonymousUser()
         self.assertEqual(user.has_perm('test'), False)
         self.assertEqual(user.has_perms(['auth.test2', 'auth.test3']), False)
+
+    def test_has_no_object_perm(self):
+        """Regressiontest for #12462"""
+        user = User.objects.get(username='test')
+        content_type=ContentType.objects.get_for_model(Group)
+        perm = Permission.objects.create(name='test', content_type=content_type, codename='test')
+        user.user_permissions.add(perm)
+        user.save()
+
+        self.assertEqual(user.has_perm('auth.test', 'object'), False)
+        self.assertEqual(user.get_all_permissions('object'), set([]))
+        self.assertEqual(user.has_perm('auth.test'), True)
+        self.assertEqual(user.get_all_permissions(), set(['auth.test']))
+
+
 
 
 class TestObj(object):

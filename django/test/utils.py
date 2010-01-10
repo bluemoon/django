@@ -1,6 +1,5 @@
 import sys, time, os
 from django.conf import settings
-from django.db import connection
 from django.core import mail
 from django.core.mail.backends import locmem
 from django.test import signals
@@ -44,7 +43,7 @@ def setup_test_environment():
     mail.SMTPConnection = locmem.EmailBackend
 
     mail.original_email_backend = settings.EMAIL_BACKEND
-    settings.EMAIL_BACKEND = 'django.core.mail.backends.locmem'
+    settings.EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
 
     mail.outbox = []
 

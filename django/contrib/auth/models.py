@@ -3,19 +3,15 @@ import urllib
 
 from django.contrib import auth
 from django.core.exceptions import ImproperlyConfigured
-from django.db import models
+from django.db import models, DEFAULT_DB_ALIAS
 from django.db.models.manager import EmptyManager
 from django.contrib.contenttypes.models import ContentType
 from django.utils.encoding import smart_str
 from django.utils.hashcompat import md5_constructor, sha_constructor
 from django.utils.translation import ugettext_lazy as _
 
-UNUSABLE_PASSWORD = '!' # This will never be a valid hash
 
-try:
-    set
-except NameError:
-    from sets import Set as set   # Python 2.3 fallback
+UNUSABLE_PASSWORD = '!' # This will never be a valid hash
 
 def get_hexdigest(algorithm, salt, raw_password):
     """
@@ -114,7 +110,7 @@ class UserManager(models.Manager):
             user.set_password(password)
         else:
             user.set_unusable_password()
-        user.save()
+        user.save(using=self.db)
         return user
 
     def create_superuser(self, username, email, password):
@@ -122,7 +118,7 @@ class UserManager(models.Manager):
         u.is_staff = True
         u.is_active = True
         u.is_superuser = True
-        u.save()
+        u.save(using=self.db)
         return u
 
     def make_random_password(self, length=10, allowed_chars='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'):
@@ -222,22 +218,26 @@ class User(models.Model):
         permissions = set()
         for backend in auth.get_backends():
             if hasattr(backend, "get_group_permissions"):
-                if obj is not None and backend.supports_object_permissions:
-                    group_permissions = backend.get_group_permissions(self, obj)
+                if obj is not None:
+                    if backend.supports_object_permissions:
+                        permissions.update(
+                            backend.get_group_permissions(self, obj)
+                        )
                 else:
-                    group_permissions = backend.get_group_permissions(self)
-                permissions.update(group_permissions)
+                    permissions.update(backend.get_group_permissions(self))
         return permissions
 
     def get_all_permissions(self, obj=None):
         permissions = set()
         for backend in auth.get_backends():
             if hasattr(backend, "get_all_permissions"):
-                if obj is not None and backend.supports_object_permissions:
-                    all_permissions = backend.get_all_permissions(self, obj)
+                if obj is not None:
+                    if backend.supports_object_permissions:
+                        permissions.update(
+                            backend.get_all_permissions(self, obj)
+                        )
                 else:
-                    all_permissions = backend.get_all_permissions(self)
-                permissions.update(all_permissions)
+                    permissions.update(backend.get_all_permissions(self))
         return permissions
 
     def has_perm(self, perm, obj=None):
@@ -259,9 +259,10 @@ class User(models.Model):
         # Otherwise we need to check the backends.
         for backend in auth.get_backends():
             if hasattr(backend, "has_perm"):
-                if obj is not None and backend.supports_object_permissions:
-                    if backend.has_perm(self, perm, obj):
-                        return True
+                if obj is not None:
+                    if (backend.supports_object_permissions and
+                        backend.has_perm(self, perm, obj)):
+                            return True
                 else:
                     if backend.has_perm(self, perm):
                         return True
@@ -319,7 +320,7 @@ class User(models.Model):
             try:
                 app_label, model_name = settings.AUTH_PROFILE_MODULE.split('.')
                 model = models.get_model(app_label, model_name)
-                self._profile_cache = model._default_manager.get(user__id__exact=self.id)
+                self._profile_cache = model._default_manager.using(self._state.db).get(user__id__exact=self.id)
                 self._profile_cache.user = self
             except (ImportError, ImproperlyConfigured):
                 raise SiteProfileNotAvailable

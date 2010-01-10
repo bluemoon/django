@@ -10,20 +10,18 @@ from django.contrib.admin.models import LogEntry, DELETION
 from django.contrib.admin.sites import LOGIN_FORM_KEY
 from django.contrib.admin.util import quote
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.utils import formats
 from django.utils.cache import get_max_age
 from django.utils.html import escape
+from django.utils.translation import get_date_formats
 
 # local test models
 from models import Article, BarAccount, CustomArticle, EmptyModel, \
     ExternalSubscriber, FooAccount, Gallery, ModelWithStringPrimaryKey, \
     Person, Persona, Picture, Podcast, Section, Subscriber, Vodcast, \
     Language, Collector, Widget, Grommet, DooHickey, FancyDoodad, Whatsit, \
-    Category
+    Category, Post
 
-try:
-    set
-except NameError:
-    from sets import Set as set
 
 class AdminViewBasicTest(TestCase):
     fixtures = ['admin-views-users.xml', 'admin-views-colors.xml', 'admin-views-fabrics.xml']
@@ -65,10 +63,19 @@ class AdminViewBasicTest(TestCase):
 
     def testBasicEditGet(self):
         """
-        A smoke test to ensureGET on the change_view works.
+        A smoke test to ensure GET on the change_view works.
         """
         response = self.client.get('/test_admin/%s/admin_views/section/1/' % self.urlbit)
         self.failUnlessEqual(response.status_code, 200)
+
+    def testBasicEditGetStringPK(self):
+        """
+        A smoke test to ensure GET on the change_view works (returns an HTTP
+        404 error, see #11191) when passing a string as the PK argument for a
+        model with an integer PK field.
+        """
+        response = self.client.get('/test_admin/%s/admin_views/section/abc/' % self.urlbit)
+        self.failUnlessEqual(response.status_code, 404)
 
     def testBasicAddPost(self):
         """
@@ -595,6 +602,19 @@ class AdminViewPermissionsTest(TestCase):
         self.failUnlessEqual(logged.object_id, u'1')
         self.client.get('/test_admin/admin/logout/')
 
+    def testDisabledPermissionsWhenLoggedIn(self):
+        self.client.login(username='super', password='secret')
+        superuser = User.objects.get(username='super')
+        superuser.is_active = False
+        superuser.save()
+
+        response = self.client.get('/test_admin/admin/')
+        self.assertContains(response, 'id="login-form"')
+        self.assertNotContains(response, 'Log out')
+
+        response = self.client.get('/test_admin/admin/secure-view/')
+        self.assertContains(response, 'id="login-form"')
+
 class AdminViewStringPrimaryKeyTest(TestCase):
     fixtures = ['admin-views-users.xml', 'string-primary-key.xml']
 
@@ -615,7 +635,7 @@ class AdminViewStringPrimaryKeyTest(TestCase):
         response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/%s/history/' % quote(self.pk))
         self.assertContains(response, escape(self.pk))
         self.failUnlessEqual(response.status_code, 200)
- 
+
     def test_get_change_view(self):
         "Retrieving the object using urlencoded form of primary key should work"
         response = self.client.get('/test_admin/admin/admin_views/modelwithstringprimarykey/%s/' % quote(self.pk))
@@ -1202,6 +1222,40 @@ class AdminActionsTest(TestCase):
         self.assertContains(response, msg)
         self.failUnlessEqual(Subscriber.objects.count(), 2)
 
+    def test_selection_counter(self):
+        """
+        Check if the selection counter is there.
+        """
+        response = self.client.get('/test_admin/admin/admin_views/subscriber/')
+        self.assertContains(response, '<span class="_acnt">0</span> of 2 subscribers selected')
+
+
+class TestCustomChangeList(TestCase):
+    fixtures = ['admin-views-users.xml']
+    urlbit = 'admin'
+
+    def setUp(self):
+        result = self.client.login(username='super', password='secret')
+        self.failUnlessEqual(result, True)
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_custom_changelist(self):
+        """
+        Validate that a custom ChangeList class can be used (#9749)
+        """
+        # Insert some data
+        post_data = {"name": u"First Gadget"}
+        response = self.client.post('/test_admin/%s/admin_views/gadget/add/' % self.urlbit, post_data)
+        self.failUnlessEqual(response.status_code, 302) # redirect somewhere
+        # Hit the page once to get messages out of the queue message list
+        response = self.client.get('/test_admin/%s/admin_views/gadget/' % self.urlbit)
+        # Ensure that that data is still not visible on the page
+        response = self.client.get('/test_admin/%s/admin_views/gadget/' % self.urlbit)
+        self.failUnlessEqual(response.status_code, 200)
+        self.assertNotContains(response, 'First Gadget')
+
 
 class TestInlineNotEditable(TestCase):
     fixtures = ['admin-views-users.xml']
@@ -1661,3 +1715,54 @@ class NeverCacheTests(TestCase):
         "Check the never-cache status of the Javascript i18n view"
         response = self.client.get('/test_admin/jsi18n/')
         self.failUnlessEqual(get_max_age(response), None)
+
+
+class ReadonlyTest(TestCase):
+    fixtures = ['admin-views-users.xml']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_readonly_get(self):
+        response = self.client.get('/test_admin/admin/admin_views/post/add/')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="posted"')
+        # 3 fields + 2 submit buttons + 2 inline management form fields, + 2
+        # hidden fields for inlines + 1 field for the inline
+        self.assertEqual(response.content.count("input"), 10)
+        self.assertContains(response, formats.localize(datetime.date.today()))
+        self.assertContains(response,
+            "<label>Awesomeness level:</label>")
+        self.assertContains(response, "Very awesome.")
+        self.assertContains(response, "Unkown coolness.")
+        self.assertContains(response, "foo")
+        self.assertContains(response,
+            formats.localize(datetime.date.today() - datetime.timedelta(days=7))
+        )
+
+        p = Post.objects.create(title="I worked on readonly_fields", content="Its good stuff")
+        response = self.client.get('/test_admin/admin/admin_views/post/%d/' % p.pk)
+        self.assertContains(response, "%d amount of cool" % p.pk)
+
+    def test_readonly_post(self):
+        data = {
+            "title": "Django Got Readonly Fields",
+            "content": "This is an incredible development.",
+            "link_set-TOTAL_FORMS": "1",
+            "link_set-INITIAL_FORMS": "0",
+        }
+        response = self.client.post('/test_admin/admin/admin_views/post/add/', data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Post.objects.count(), 1)
+        p = Post.objects.get()
+        self.assertEqual(p.posted, datetime.date.today())
+
+        data["posted"] = "10-8-1990" # some date that's not today
+        response = self.client.post('/test_admin/admin/admin_views/post/add/', data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Post.objects.count(), 2)
+        p = Post.objects.order_by('-id')[0]
+        self.assertEqual(p.posted, datetime.date.today())

@@ -187,14 +187,14 @@ def model_detail(request, app_label, model_name):
     try:
         app_mod = models.get_app(app_label)
     except ImproperlyConfigured:
-        raise Http404, _("App %r not found") % app_label
+        raise Http404(_("App %r not found") % app_label)
     model = None
     for m in models.get_models(app_mod):
         if m._meta.object_name.lower() == model_name:
             model = m
             break
     if model is None:
-        raise Http404, _("Model %(model_name)r not found in app %(app_label)r") % {'model_name': model_name, 'app_label': app_label}
+        raise Http404(_("Model %(model_name)r not found in app %(app_label)r") % {'model_name': model_name, 'app_label': app_label})
 
     opts = model._meta
 
@@ -327,19 +327,11 @@ def get_return_data_type(func_name):
     return ''
 
 def get_readable_field_data_type(field):
-    """Returns the first line of a doc string for a given field type, if it 
-    exists.  Fields' docstrings can contain format strings, which will be 
-    interpolated against the values of Field.__dict__ before being output.  
-    If no docstring is given, a sensible value will be auto-generated from 
-    the field's class name."""
+    """Returns the description for a given field type, if it exists,
+    Fields' descriptions can contain format strings, which will be interpolated
+    against the values of field.__dict__ before being output."""
 
-    if field.__doc__:
-        doc = field.__doc__.split('\n')[0]
-        return _(doc) % field.__dict__
-    else:
-        return _(u'Field of type: %(field_type)s') % {
-            'field_type': field.__class__.__name__
-        } 
+    return field.description % field.__dict__
 
 def extract_views_from_urlpatterns(urlpatterns, base=''):
     """
@@ -361,7 +353,7 @@ def extract_views_from_urlpatterns(urlpatterns, base=''):
                 continue
             views.extend(extract_views_from_urlpatterns(patterns, base + p.regex.pattern))
         else:
-            raise TypeError, _("%s does not appear to be a urlpattern object") % p
+            raise TypeError(_("%s does not appear to be a urlpattern object") % p)
     return views
 
 named_group_matcher = re.compile(r'\(\?P(<\w+>).+?\)')

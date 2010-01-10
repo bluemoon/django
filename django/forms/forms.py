@@ -2,8 +2,8 @@
 Form classes
 """
 
-from copy import deepcopy
-
+from django.core.exceptions import ValidationError
+from django.utils.copycompat import deepcopy
 from django.utils.datastructures import SortedDict
 from django.utils.html import conditional_escape
 from django.utils.encoding import StrAndUnicode, smart_unicode, force_unicode
@@ -11,7 +11,7 @@ from django.utils.safestring import mark_safe
 
 from fields import Field, FileField
 from widgets import Media, media_property, TextInput, Textarea
-from util import flatatt, ErrorDict, ErrorList, ValidationError
+from util import flatatt, ErrorDict, ErrorList
 
 __all__ = ('BaseForm', 'Form')
 
@@ -138,9 +138,9 @@ class BaseForm(StrAndUnicode):
         "Helper function for outputting HTML. Used by as_table(), as_ul(), as_p()."
         top_errors = self.non_field_errors() # Errors that should be displayed above all fields.
         output, hidden_fields = [], []
-        html_class_attr = ''
 
         for name, field in self.fields.items():
+            html_class_attr = ''
             bf = BoundField(self, field, name)
             bf_errors = self.error_class([conditional_escape(error) for error in bf.errors]) # Escape and cache in local variable.
             if bf.is_hidden:

@@ -1,4 +1,6 @@
-from copy import deepcopy
+from types import GeneratorType
+
+from django.utils.copycompat import deepcopy
 
 
 class MergeDict(object):
@@ -65,6 +67,11 @@ class SortedDict(dict):
     def __init__(self, data=None):
         if data is None:
             data = {}
+        elif isinstance(data, GeneratorType):
+            # Unfortunately we need to be able to read a generator twice.  Once
+            # to get the data into self with our super().__init__ call and a
+            # second time to setup keyOrder correctly
+            data = list(data)
         super(SortedDict, self).__init__(data)
         if isinstance(data, dict):
             self.keyOrder = data.keys()
@@ -201,7 +208,7 @@ class MultiValueDict(dict):
         try:
             list_ = super(MultiValueDict, self).__getitem__(key)
         except KeyError:
-            raise MultiValueDictKeyError, "Key %r not found in %r" % (key, self)
+            raise MultiValueDictKeyError("Key %r not found in %r" % (key, self))
         try:
             return list_[-1]
         except IndexError:
@@ -214,7 +221,7 @@ class MultiValueDict(dict):
         return self.__class__(super(MultiValueDict, self).items())
 
     def __deepcopy__(self, memo=None):
-        import copy
+        import django.utils.copycompat as copy
         if memo is None:
             memo = {}
         result = self.__class__()
@@ -318,7 +325,7 @@ class MultiValueDict(dict):
         Also accepts keyword args.
         """
         if len(args) > 1:
-            raise TypeError, "update expected at most 1 arguments, got %d" % len(args)
+            raise TypeError("update expected at most 1 arguments, got %d" % len(args))
         if args:
             other_dict = args[0]
             if isinstance(other_dict, MultiValueDict):
@@ -329,7 +336,7 @@ class MultiValueDict(dict):
                     for key, value in other_dict.items():
                         self.setlistdefault(key, []).append(value)
                 except TypeError:
-                    raise ValueError, "MultiValueDict.update() takes either a MultiValueDict or dictionary"
+                    raise ValueError("MultiValueDict.update() takes either a MultiValueDict or dictionary")
         for key, value in kwargs.iteritems():
             self.setlistdefault(key, []).append(value)
 
@@ -393,7 +400,7 @@ class ImmutableList(tuple):
         if isinstance(self.warning, Exception):
             raise self.warning
         else:
-            raise AttributeError, self.warning
+            raise AttributeError(self.warning)
 
     # All list mutation functions complain.
     __delitem__  = complain

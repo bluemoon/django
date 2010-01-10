@@ -84,6 +84,7 @@ LANGUAGES = (
     ('sk', gettext_noop('Slovak')),
     ('sl', gettext_noop('Slovenian')),
     ('sr', gettext_noop('Serbian')),
+    ('sr-latn', gettext_noop('Serbian Latin')),
     ('sv', gettext_noop('Swedish')),
     ('ta', gettext_noop('Tamil')),
     ('te', gettext_noop('Telugu')),
@@ -102,6 +103,10 @@ LANGUAGES_BIDI = ("he", "ar", "fa")
 USE_I18N = True
 LOCALE_PATHS = ()
 LANGUAGE_COOKIE_NAME = 'django_language'
+
+# If you set this to True, Django will format dates, numbers and calendars
+# according to user current locale
+USE_L10N = False
 
 # Not-necessarily-technical managers of the site. They get broken link
 # notifications and other various e-mails.
@@ -131,11 +136,14 @@ DATABASE_HOST = ''             # Set to empty string for localhost. Not used wit
 DATABASE_PORT = ''             # Set to empty string for default. Not used with sqlite3.
 DATABASE_OPTIONS = {}          # Set to empty dictionary for default.
 
+DATABASES = {
+}
+
 # The email backend to use. For possible shortcuts see django.core.mail.
 # The default is to use the SMTP backend.
 # Third-party backends can be specified by providing a Python path
 # to a module that defines an EmailBackend class.
-EMAIL_BACKEND = 'django.core.mail.backends.smtp'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # Host for sending e-mail.
 EMAIL_HOST = 'localhost'
@@ -262,6 +270,12 @@ FILE_UPLOAD_TEMP_DIR = None
 # you'd pass directly to os.chmod; see http://docs.python.org/lib/os-file-dir.html.
 FILE_UPLOAD_PERMISSIONS = None
 
+# Python module path where user will place custom format definition.
+# The directory where this setting is pointing should contain subdirectories
+# named as the locales, containing a formats.py file
+# (i.e. "myproject.locale" for myproject/locale/en/formats.py etc. use)
+FORMAT_MODULE_PATH = None
+
 # Default formatting for date objects. See all available format strings here:
 # http://docs.djangoproject.com/en/dev/ref/templates/builtins/#now
 DATE_FORMAT = 'N j, Y'
@@ -283,6 +297,70 @@ YEAR_MONTH_FORMAT = 'F Y'
 # See all available format strings here:
 # http://docs.djangoproject.com/en/dev/ref/templates/builtins/#now
 MONTH_DAY_FORMAT = 'F j'
+
+# Default shortformatting for date objects. See all available format strings here:
+# http://docs.djangoproject.com/en/dev/ref/templates/builtins/#now
+SHORT_DATE_FORMAT = 'm/d/Y'
+
+# Default short formatting for datetime objects.
+# See all available format strings here:
+# http://docs.djangoproject.com/en/dev/ref/templates/builtins/#now
+SHORT_DATETIME_FORMAT = 'm/d/Y P'
+
+# Default formats to be used when parsing dates from input boxes, in order
+# See all available format string here:
+# http://docs.python.org/library/datetime.html#strftime-behavior
+# * Note that these format strings are different from the ones to display dates
+DATE_INPUT_FORMATS = (
+    '%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', # '2006-10-25', '10/25/2006', '10/25/06'
+    '%b %d %Y', '%b %d, %Y',            # 'Oct 25 2006', 'Oct 25, 2006'
+    '%d %b %Y', '%d %b, %Y',            # '25 Oct 2006', '25 Oct, 2006'
+    '%B %d %Y', '%B %d, %Y',            # 'October 25 2006', 'October 25, 2006'
+    '%d %B %Y', '%d %B, %Y',            # '25 October 2006', '25 October, 2006'
+)
+
+# Default formats to be used when parsing times from input boxes, in order
+# See all available format string here:
+# http://docs.python.org/library/datetime.html#strftime-behavior
+# * Note that these format strings are different from the ones to display dates
+TIME_INPUT_FORMATS = (
+    '%H:%M:%S',     # '14:30:59'
+    '%H:%M',        # '14:30'
+)
+
+# Default formats to be used when parsing dates and times from input boxes,
+# in order
+# See all available format string here:
+# http://docs.python.org/library/datetime.html#strftime-behavior
+# * Note that these format strings are different from the ones to display dates
+DATETIME_INPUT_FORMATS = (
+    '%Y-%m-%d %H:%M:%S',     # '2006-10-25 14:30:59'
+    '%Y-%m-%d %H:%M',        # '2006-10-25 14:30'
+    '%Y-%m-%d',              # '2006-10-25'
+    '%m/%d/%Y %H:%M:%S',     # '10/25/2006 14:30:59'
+    '%m/%d/%Y %H:%M',        # '10/25/2006 14:30'
+    '%m/%d/%Y',              # '10/25/2006'
+    '%m/%d/%y %H:%M:%S',     # '10/25/06 14:30:59'
+    '%m/%d/%y %H:%M',        # '10/25/06 14:30'
+    '%m/%d/%y',              # '10/25/06'
+)
+
+# First day of week, to be used on calendars
+# 0 means Sunday, 1 means Monday...
+FIRST_DAY_OF_WEEK = 0
+
+# Decimal separator symbol
+DECIMAL_SEPARATOR = '.'
+
+# Boolean that sets whether to add thousand separator when formatting numbers
+USE_THOUSAND_SEPARATOR = False
+
+# Number of digits that will be togheter, when spliting them by THOUSAND_SEPARATOR
+# 0 means no grouping, 3 means splitting by thousands...
+NUMBER_GROUPING = 0
+
+# Thousand separator symbol
+THOUSAND_SEPARATOR = ','
 
 # Do you want to manage transactions manually?
 # Hint: you really don't!

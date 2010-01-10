@@ -34,16 +34,16 @@ class BaseHandler(object):
             try:
                 dot = middleware_path.rindex('.')
             except ValueError:
-                raise exceptions.ImproperlyConfigured, '%s isn\'t a middleware module' % middleware_path
+                raise exceptions.ImproperlyConfigured('%s isn\'t a middleware module' % middleware_path)
             mw_module, mw_classname = middleware_path[:dot], middleware_path[dot+1:]
             try:
                 mod = import_module(mw_module)
             except ImportError, e:
-                raise exceptions.ImproperlyConfigured, 'Error importing middleware %s: "%s"' % (mw_module, e)
+                raise exceptions.ImproperlyConfigured('Error importing middleware %s: "%s"' % (mw_module, e))
             try:
                 mw_class = getattr(mod, mw_classname)
             except AttributeError:
-                raise exceptions.ImproperlyConfigured, 'Middleware module "%s" does not define a "%s" class' % (mw_module, mw_classname)
+                raise exceptions.ImproperlyConfigured('Middleware module "%s" does not define a "%s" class' % (mw_module, mw_classname))
 
             try:
                 mw_instance = mw_class()
@@ -68,24 +68,26 @@ class BaseHandler(object):
         from django.core import exceptions, urlresolvers
         from django.conf import settings
 
-        # Reset the urlconf for this thread.
-        urlresolvers.set_urlconf(None)
-
-        # Apply request middleware
-        for middleware_method in self._request_middleware:
-            response = middleware_method(request)
-            if response:
-                return response
-
-        # Get urlconf from request object, if available.  Otherwise use default.
-        urlconf = getattr(request, "urlconf", settings.ROOT_URLCONF)
-
-        # Set the urlconf for this thread to the one specified above.
-        urlresolvers.set_urlconf(urlconf)
-
-        resolver = urlresolvers.RegexURLResolver(r'^/', urlconf)
         try:
             try:
+                # Reset the urlconf for this thread.
+                urlresolvers.set_urlconf(None)
+                # Obtain a default resolver. It's needed early for handling 404's.
+                resolver = urlresolvers.RegexURLResolver(r'^/', None)
+
+                # Apply request middleware
+                for middleware_method in self._request_middleware:
+                    response = middleware_method(request)
+                    if response:
+                        return response
+
+                # Get urlconf from request object, if available.  Otherwise use default.
+                urlconf = getattr(request, "urlconf", settings.ROOT_URLCONF)
+                # Set the urlconf for this thread to the one specified above.
+                urlresolvers.set_urlconf(urlconf)
+                # Reset the resolver with a possibly new urlconf
+                resolver = urlresolvers.RegexURLResolver(r'^/', urlconf)
+
                 callback, callback_args, callback_kwargs = resolver.resolve(
                         request.path_info)
 
@@ -113,7 +115,7 @@ class BaseHandler(object):
                         view_name = callback.func_name # If it's a function
                     except AttributeError:
                         view_name = callback.__class__.__name__ + '.__call__' # If it's a class
-                    raise ValueError, "The view %s.%s didn't return an HttpResponse object." % (callback.__module__, view_name)
+                    raise ValueError("The view %s.%s didn't return an HttpResponse object." % (callback.__module__, view_name))
 
                 return response
             except http.Http404, e:
