@@ -17,8 +17,10 @@ the hood".
 
 .. toctree::
    :maxdepth: 1
-   
+
    contributing
    documentation
    committers
    release-process
+   deprecation
+   svn

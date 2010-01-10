@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.contrib.admin import widgets
 from unittest import TestCase
 from django.test import TestCase as DjangoTestCase
+from django.db.models import DateField
 import models
 
 class AdminFormfieldForDBFieldTests(TestCase):
@@ -89,7 +90,7 @@ class AdminFormfieldForDBFieldTests(TestCase):
 
     def testFormfieldOverrides(self):
         self.assertFormfield(models.Event, 'start_date', forms.TextInput,
-                             formfield_overrides={'widget': forms.TextInput})
+                             formfield_overrides={DateField: {'widget': forms.TextInput}})
 
     def testFieldWithChoices(self):
         self.assertFormfield(models.Member, 'gender', forms.Select)
@@ -115,6 +116,7 @@ class AdminFormfieldForDBFieldWithRequestTests(DjangoTestCase):
 
 class AdminForeignKeyWidgetChangeList(DjangoTestCase):
     fixtures = ["admin-widgets-users.xml"]
+    admin_root = '/widget_admin'
 
     def setUp(self):
         self.client.login(username="super", password="secret")
@@ -123,5 +125,9 @@ class AdminForeignKeyWidgetChangeList(DjangoTestCase):
         self.client.logout()
 
     def test_changelist_foreignkey(self):
-        response = self.client.get('/widget_admin/admin_widgets/car/')
-        self.failUnless('/widget_admin/auth/user/add/' in response.content)
+        response = self.client.get('%s/admin_widgets/car/' % self.admin_root)
+        self.failUnless('%s/auth/user/add/' % self.admin_root in response.content)
+
+class OldAdminForeignKeyWidgetChangeList(AdminForeignKeyWidgetChangeList):
+    urls = 'regressiontests.admin_widgets.urls2'
+    admin_root = '/deep/down/admin'

@@ -56,6 +56,16 @@ __test__ = {'API_TESTS': """
 >>> company_query
 [{'num_chairs': 2302, 'name': u'Example Inc.', 'num_employees': 2300}, {'num_chairs': 5, 'name': u'Foobar Ltd.', 'num_employees': 3}, {'num_chairs': 34, 'name': u'Test GmbH', 'num_employees': 32}]
 
+# Law of order of operations is followed
+>>> _ =company_query.update(num_chairs=F('num_employees') + 2 * F('num_employees'))
+>>> company_query
+[{'num_chairs': 6900, 'name': u'Example Inc.', 'num_employees': 2300}, {'num_chairs': 9, 'name': u'Foobar Ltd.', 'num_employees': 3}, {'num_chairs': 96, 'name': u'Test GmbH', 'num_employees': 32}]
+
+# Law of order of operations can be overridden by parentheses
+>>> _ =company_query.update(num_chairs=((F('num_employees') + 2) * F('num_employees')))
+>>> company_query
+[{'num_chairs': 5294600, 'name': u'Example Inc.', 'num_employees': 2300}, {'num_chairs': 15, 'name': u'Foobar Ltd.', 'num_employees': 3}, {'num_chairs': 1088, 'name': u'Test GmbH', 'num_employees': 32}]
+
 # The relation of a foreign key can become copied over to an other foreign key.
 >>> Company.objects.update(point_of_contact=F('ceo'))
 3
@@ -79,5 +89,44 @@ u'foo'
 Traceback (most recent call last):
 ...
 FieldError: Joined field references are not permitted in this query
+
+# F expressions can be used to update attributes on single objects
+>>> test_gmbh = Company.objects.get(name='Test GmbH')
+>>> test_gmbh.num_employees
+32
+>>> test_gmbh.num_employees = F('num_employees') + 4
+>>> test_gmbh.save()
+>>> test_gmbh = Company.objects.get(pk=test_gmbh.pk)
+>>> test_gmbh.num_employees
+36
+
+# F expressions cannot be used to update attributes which are foreign keys, or
+# attributes which involve joins.
+>>> test_gmbh.point_of_contact = None
+>>> test_gmbh.save()
+>>> test_gmbh.point_of_contact is None
+True
+>>> test_gmbh.point_of_contact = F('ceo')
+Traceback (most recent call last):
+...
+ValueError: Cannot assign "<django.db.models.expressions.F object at ...>": "Company.point_of_contact" must be a "Employee" instance.
+
+>>> test_gmbh.point_of_contact = test_gmbh.ceo
+>>> test_gmbh.save()
+>>> test_gmbh.name = F('ceo__last_name')
+>>> test_gmbh.save()
+Traceback (most recent call last):
+...
+FieldError: Joined field references are not permitted in this query
+
+# F expressions cannot be used to update attributes on objects which do not yet
+# exist in the database
+>>> acme = Company(name='The Acme Widget Co.', num_employees=12, num_chairs=5,
+...     ceo=test_gmbh.ceo)
+>>> acme.num_employees = F('num_employees') + 16
+>>> acme.save()
+Traceback (most recent call last):
+...
+TypeError: int() argument must be a string or a number...
 
 """}

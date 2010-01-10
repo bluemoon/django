@@ -25,21 +25,26 @@ Django's admin interface.
 Overview
 ========
 
-There are five steps in activating the Django admin site:
+There are six steps in activating the Django admin site:
 
-    1. Add ``django.contrib.admin`` to your ``INSTALLED_APPS`` setting.
+    1. Add ``'django.contrib.admin'`` to your :setting:`INSTALLED_APPS`
+       setting.
 
-    2. Determine which of your application's models should be editable in the
+    2. Admin has two dependencies - ``django.contrib.auth`` and
+       ``django.contrib.contenttypes``. If these applications are not
+       in your :setting:`INSTALLED_APPS` list, add them.
+
+    3. Determine which of your application's models should be editable in the
        admin interface.
 
-    3. For each of those models, optionally create a ``ModelAdmin`` class that
+    4. For each of those models, optionally create a ``ModelAdmin`` class that
        encapsulates the customized admin functionality and options for that
        particular model.
 
-    4. Instantiate an ``AdminSite`` and tell it about each of your models and
+    5. Instantiate an ``AdminSite`` and tell it about each of your models and
        ``ModelAdmin`` classes.
 
-    5. Hook the ``AdminSite`` instance into your URLconf.
+    6. Hook the ``AdminSite`` instance into your URLconf.
 
 Other topics
 ------------
@@ -167,6 +172,11 @@ The ``field_options`` dictionary can have the following keys:
             'fields': (('first_name', 'last_name'), 'address', 'city', 'state'),
             }
 
+        .. versionadded:: 1.2
+
+        ``fields`` can contain values defined in
+        :attr:`ModelAdmin.readonly_fields` to be displayed as read-only.
+
     * ``classes``
         A list containing extra CSS classes to apply to the fieldset.
 
@@ -204,6 +214,11 @@ the ``django.contrib.flatpages.FlatPage`` model as follows::
 
 In the above example, only the fields 'url', 'title' and 'content' will be
 displayed, sequentially, in the form.
+
+.. versionadded:: 1.2
+
+``fields`` can contain values defined in :attr:`ModelAdmin.readonly_fields`
+to be displayed as read-only.
 
 .. admonition:: Note
 
@@ -347,7 +362,7 @@ A few special cases to note about ``list_display``:
               birthday = models.DateField()
 
               def born_in_fifties(self):
-                  return self.birthday.strftime('%Y')[:3] == 5
+                  return self.birthday.strftime('%Y')[:3] == '195'
               born_in_fifties.boolean = True
 
           class PersonAdmin(admin.ModelAdmin):
@@ -535,6 +550,21 @@ into a ``Input`` widget for either a ``ForeignKey`` or ``ManyToManyField``::
     class ArticleAdmin(admin.ModelAdmin):
         raw_id_fields = ("newspaper",)
 
+.. attribute:: ModelAdmin.readonly_fields
+
+.. versionadded:: 1.2
+
+By default the admin shows all fields as editable. Any fields in this option
+(which should be a ``list`` or ``tuple``) will display its data as-is and
+non-editable. This option behaves nearly identical to :attr:`ModelAdmin.list_display`.
+Usage is the same, however, when you specify :attr:`ModelAdmin.fields` or
+:attr:`ModelAdmin.fieldsets` the read-only fields must be present to be shown
+(they are ignored otherwise).
+
+If ``readonly_fields`` is used without defining explicit ordering through
+:attr:`ModelAdmin.fields` or :attr:`ModelAdmin.fieldsets` they will be added
+last after all editable fields.
+
 .. attribute:: ModelAdmin.save_as
 
 Set ``save_as`` to enable a "save as" feature on admin change forms.
@@ -667,6 +697,51 @@ Controls where on the page the actions bar appears. By default, the admin
 changelist displays actions at the top of the page (``actions_on_top = True;
 actions_on_bottom = False``).
 
+.. attribute:: ModelAdmin.actions_selection_counter
+
+Controls whether a selection counter is display next to the action dropdown.
+By default, the admin changelist will display it
+(``actions_selection_counter = True``).
+
+.. attribute:: ModelAdmin.change_list_template
+
+Path to a custom template that will be used by the model objects "change list"
+view. Templates can override or extend base admin templates as described in
+`Overriding Admin Templates`_.
+
+If you don't specify this attribute, a default template shipped with Django
+that provides the standard appearance is used.
+
+.. attribute:: ModelAdmin.change_form_template
+
+Path to a custom template that will be used by both the model object creation
+and change views. Templates can override or extend base admin templates as
+described in `Overriding Admin Templates`_.
+
+If you don't specify this attribute, a default template shipped with Django
+that provides the standard appearance is used.
+
+.. attribute:: ModelAdmin.object_history_template
+
+Path to a custom template that will be used by the model object change history
+display view. Templates can override or extend base admin templates as
+described in `Overriding Admin Templates`_.
+
+If you don't specify this attribute, a default template shipped with Django
+that provides the standard appearance is used.
+
+.. attribute:: ModelAdmin.delete_confirmation_template
+
+Path to a custom template that will be used by the view responsible of showing
+the confirmation page when the user decides to delete one or more model
+objects. Templates can override or extend base admin templates as described in
+`Overriding Admin Templates`_.
+
+If you don't specify this attribute, a default template shipped with Django
+that provides the standard appearance is used.
+
+.. _model-admin-methods:
+
 ``ModelAdmin`` methods
 ----------------------
 
@@ -700,6 +775,15 @@ model instance::
                 instance.save()
             formset.save_m2m()
 
+.. method:: ModelAdmin.get_readonly_fields(self, request, obj=None)
+
+.. versionadded:: 1.2
+
+The ``get_readonly_fields`` method is given the ``HttpRequest`` and the
+``obj`` being edited (or ``None`` on an add form) and is expected to return a
+``list`` or ``tuple`` of field names that will be displayed as read-only, as
+described above in the :attr:`ModelAdmin.readonly_fields` section.
+
 .. method:: ModelAdmin.get_urls(self)
 
 .. versionadded:: 1.1
@@ -723,12 +807,19 @@ documented in :ref:`topics-http-urls`::
     anything, so you'll usually want to prepend your custom URLs to the built-in
     ones.
 
-Note, however, that the ``self.my_view`` function registered above will *not*
-have any permission check done; it'll be accessible to the general public. Since
-this is usually not what you want, Django provides a convience wrapper to check
-permissions. This wrapper is :meth:`AdminSite.admin_view` (i.e.
-``self.admin_site.admin_view`` inside a ``ModelAdmin`` instance); use it like
-so::
+However, the ``self.my_view`` function registered above suffers from two
+problems:
+
+  * It will *not* perform any permission checks, so it will be accessible to
+    the general public.
+  * It will *not* provide any header details to prevent caching. This means if
+    the page retrieves data from the database, and caching middleware is
+    active, the page could show outdated information.
+
+Since this is usually not what you want, Django provides a convenience wrapper
+to check permissions and mark the view as non-cacheable. This wrapper is
+:meth:`AdminSite.admin_view` (i.e.  ``self.admin_site.admin_view`` inside a
+``ModelAdmin`` instance); use it like so::
 
     class MyModelAdmin(admin.ModelAdmin):
         def get_urls(self):
@@ -742,7 +833,14 @@ Notice the wrapped view in the fifth line above::
 
     (r'^my_view/$', self.admin_site.admin_view(self.my_view))
 
-This wrapping will protect ``self.my_view`` from unauthorized access.
+This wrapping will protect ``self.my_view`` from unauthorized access and will
+apply the ``django.views.decorators.cache.never_cache`` decorator to make sure
+it is not cached if the cache middleware is active.
+
+If the page is cacheable, but you still want the permission check to be performed,
+you can pass a ``cacheable=True`` argument to :meth:`AdminSite.admin_view`::
+
+    (r'^my_view/$', self.admin_site.admin_view(self.my_view, cacheable=True))
 
 .. method:: ModelAdmin.formfield_for_foreignkey(self, db_field, request, **kwargs)
 
@@ -755,12 +853,62 @@ return a subset of objects for this foreign key field based on the user::
     class MyModelAdmin(admin.ModelAdmin):
         def formfield_for_foreignkey(self, db_field, request, **kwargs):
             if db_field.name == "car":
-                kwargs["queryset"] = Car.object.filter(owner=request.user)
+                kwargs["queryset"] = Car.objects.filter(owner=request.user)
                 return db_field.formfield(**kwargs)
             return super(MyModelAdmin, self).formfield_for_foreignkey(db_field, request, **kwargs)
 
 This uses the ``HttpRequest`` instance to filter the ``Car`` foreign key field
 to only the cars owned by the ``User`` instance.
+
+Other methods
+~~~~~~~~~~~~~
+
+.. method:: ModelAdmin.add_view(self, request, form_url='', extra_context=None)
+
+Django view for the model instance addition page. See note below.
+
+.. method:: ModelAdmin.change_view(self, request, object_id, extra_context=None)
+
+Django view for the model instance edition page. See note below.
+
+.. method:: ModelAdmin.changelist_view(self, request, extra_context=None)
+
+Django view for the model instances change list/actions page. See note below.
+
+.. method:: ModelAdmin.delete_view(self, request, object_id, extra_context=None)
+
+Django view for the model instance(s) deletion confirmation page. See note below.
+
+.. method:: ModelAdmin.history_view(self, request, object_id, extra_context=None)
+
+Django view for the page that shows the modification history for a given model
+instance.
+
+Unlike the hook-type ``ModelAdmin`` methods detailed in the previous section,
+these five methods are in reality designed to be invoked as Django views from
+the admin application URL dispatching handler to render the pages that deal
+with model instances CRUD operations. As a result, completely overriding these
+methods will significantly change the behavior of the admin application.
+
+One common reason for overriding these methods is to augment the context data
+that is provided to the template that renders the view. In the following
+example, the change view is overridden so that the rendered template is
+provided some extra mapping data that would not otherwise be available::
+
+    class MyModelAdmin(admin.ModelAdmin):
+
+        # A template for a very customized change view:
+        change_form_template = 'admin/myapp/extras/openstreetmap_change_form.html'
+
+        def get_osm_info(self):
+            # ...
+
+        def change_view(self, request, object_id, extra_context=None):
+            my_context = {
+                'osm_data': self.get_osm_info(),
+            }
+            return super(MyModelAdmin, self).change_view(request, object_id,
+                extra_context=my_context)
 
 ``ModelAdmin`` media definitions
 --------------------------------
@@ -783,7 +931,7 @@ Adding custom validation to the admin
 -------------------------------------
 
 Adding custom validation of data in the admin is quite easy. The automatic admin
-interfaces reuses :mod:`django.forms`, and the ``ModelAdmin`` class gives you
+interface reuses :mod:`django.forms`, and the ``ModelAdmin`` class gives you
 the ability define your own form::
 
     class ArticleAdmin(admin.ModelAdmin):
@@ -803,7 +951,9 @@ any field::
 
 It is important you use a ``ModelForm`` here otherwise things can break. See the
 :ref:`forms <ref-forms-index>` documentation on :ref:`custom validation
-<ref-forms-validation>` for more information.
+<ref-forms-validation>` and, more specifically, the
+:ref:`model form validation notes <overriding-modelform-clean-method>` for more
+information.
 
 .. _admin-inlines:
 
@@ -938,16 +1088,70 @@ automatically::
             FriendshipInline,
         ]
 
+Working with Many-to-Many Models
+--------------------------------
+
+.. versionadded:: 1.2
+
+By default, admin widgets for many-to-many relations will be displayed
+on whichever model contains the actual reference to the ``ManyToManyField``.
+Depending on your ``ModelAdmin`` definition, each many-to-many field in your
+model will be represented by a standard HTML ``<select multiple>``, a
+horizontal or vertical filter, or a ``raw_id_admin`` widget. However, it is
+also possible to to replace these widgets with inlines.
+
+Suppose we have the following models::
+
+    class Person(models.Model):
+        name = models.CharField(max_length=128)
+
+    class Group(models.Model):
+        name = models.CharField(max_length=128)
+        members = models.ManyToManyField(Person, related_name='groups')
+
+If you want to display many-to-many relations using an inline, you can do
+so by defining an ``InlineModelAdmin`` object for the relationship::
+
+    class MembershipInline(admin.TabularInline):
+        model = Group.members.through
+
+    class PersonAdmin(admin.ModelAdmin):
+        inlines = [
+            MembershipInline,
+        ]
+
+    class GroupAdmin(admin.ModelAdmin):
+        inlines = [
+            MembershipInline,
+        ]
+        exclude = ('members',)
+
+There are two features worth noting in this example.
+
+Firstly - the ``MembershipInline`` class references ``Group.members.through``.
+The ``through`` attribute is a reference to the model that manages the
+many-to-many relation. This model is automatically created by Django when you
+define a many-to-many field.
+
+Secondly, the ``GroupAdmin`` must manually exclude the ``members`` field.
+Django displays an admin widget for a many-to-many field on the model that
+defines the relation (in this case, ``Group``). If you want to use an inline
+model to represent the many-to-many relationship, you must tell Django's admin
+to *not* display this widget - otherwise you will end up with two widgets on
+your admin page for managing the relation.
+
+In all other respects, the ``InlineModelAdmin`` is exactly the same as any
+other. You can customize the appearance using any of the normal
+``InlineModelAdmin`` properties.
+
 Working with Many-to-Many Intermediary Models
 ----------------------------------------------
 
-By default, admin widgets for many-to-many relations will be displayed inline
-on whichever model contains the actual reference to the ``ManyToManyField``.
-However, when you specify an intermediary model using the ``through``
-argument to a ``ManyToManyField``, the admin will not display a widget by
-default. This is because each instance of that intermediary model requires
-more information than could be displayed in a single widget, and the layout
-required for multiple widgets will vary depending on the intermediate model.
+When you specify an intermediary model using the ``through`` argument to a
+``ManyToManyField``, the admin will not display a widget by default. This is
+because each instance of that intermediary model requires more information
+than could be displayed in a single widget, and the layout required for
+multiple widgets will vary depending on the intermediate model.
 
 However, we still want to be able to edit that information inline. Fortunately,
 this is easy to do with inline admin models. Suppose we have the following
@@ -1106,7 +1310,7 @@ directory, our link would appear on every model's change form.
 Templates which may be overridden per app or model
 --------------------------------------------------
 
-Not every template in ``contrib\admin\templates\admin`` may be overridden per
+Not every template in ``contrib/admin/templates/admin`` may be overridden per
 app or per model. The following can:
 
     * ``app_index.html``
@@ -1131,13 +1335,13 @@ Root and login templates
 ------------------------
 
 If you wish to change the index or login templates, you are better off creating
-your own ``AdminSite`` instance (see below), and changing the ``index_template``
-or ``login_template`` properties.
+your own ``AdminSite`` instance (see below), and changing the :attr:`AdminSite.index_template`
+or :attr:`AdminSite.login_template` properties.
 
 ``AdminSite`` objects
 =====================
 
-.. class:: AdminSite
+.. class:: AdminSite(name=None)
 
 A Django administrative site is represented by an instance of
 ``django.contrib.admin.sites.AdminSite``; by default, an instance of
@@ -1150,6 +1354,29 @@ or add anything you like. Then, simply create an instance of your
 ``AdminSite`` subclass (the same way you'd instantiate any other
 Python class), and register your models and ``ModelAdmin`` subclasses
 with it instead of using the default.
+
+.. versionadded:: 1.1
+
+When constructing an instance of an ``AdminSite``, you are able to provide
+a unique instance name using the ``name`` argument to the constructor. This
+instance name is used to identify the instance, especially when
+:ref:`reversing admin URLs <admin-reverse-urls>`. If no instance name is
+provided, a default instance name of ``admin`` will be used.
+
+``AdminSite`` attributes
+------------------------
+
+.. attribute:: AdminSite.index_template
+
+Path to a custom template that will be used by the admin site main index view.
+Templates can override or extend base admin templates as described in
+`Overriding Admin Templates`_.
+
+.. attribute:: AdminSite.login_template
+
+Path to a custom template that will be used by the admin site login view.
+Templates can override or extend base admin templates as described in
+`Overriding Admin Templates`_.
 
 Hooking ``AdminSite`` instances into your URLconf
 -------------------------------------------------
@@ -1168,7 +1395,7 @@ In this example, we register the default ``AdminSite`` instance
     admin.autodiscover()
 
     urlpatterns = patterns('',
-        ('^admin/', include(admin.site.urls)),
+        (r'^admin/', include(admin.site.urls)),
     )
 
 Above we used ``admin.autodiscover()`` to automatically load the
@@ -1182,7 +1409,7 @@ In this example, we register the ``AdminSite`` instance
     from myproject.admin import admin_site
 
     urlpatterns = patterns('',
-        ('^myadmin/', include(admin_site.urls)),
+        (r'^myadmin/', include(admin_site.urls)),
     )
 
 There is really no need to use autodiscover when using your own ``AdminSite``
@@ -1210,8 +1437,8 @@ respectively::
     from myproject.admin import basic_site, advanced_site
 
     urlpatterns = patterns('',
-        ('^basic-admin/', include(basic_site.urls)),
-        ('^advanced-admin/', include(advanced_site.urls)),
+        (r'^basic-admin/', include(basic_site.urls)),
+        (r'^advanced-admin/', include(advanced_site.urls)),
     )
 
 ``AdminSite`` instances take a single argument to their constructor, their
@@ -1233,10 +1460,10 @@ a pattern for your new view.
 
 .. note::
     Any view you render that uses the admin templates, or extends the base
-    admin template, should include in it's context a variable named
-    ``admin_site`` that contains the name of the :class:`AdminSite` instance. For
-    :class:`AdminSite` instances, this means ``self.name``; for :class:`ModelAdmin`
-    instances, this means ``self.admin_site.name``.
+    admin template, should provide the ``current_app`` argument to
+    ``RequestContext`` or ``Context`` when rendering the template.  It should
+    be set to either ``self.name`` if your view is on an ``AdminSite`` or
+    ``self.admin_site.name`` if your view is on a ``ModelAdmin``.
 
 .. _admin-reverse-urls:
 
@@ -1250,37 +1477,31 @@ accessible using Django's :ref:`URL reversing system <naming-url-patterns>`.
 
 The :class:`AdminSite` provides the following named URL patterns:
 
-    ======================  =============================== =============
-    Page                    URL name                        Parameters
-    ======================  =============================== =============
-    Index                   ``admin_index``
-    Logout                  ``admin_logout``
-    Password change         ``admin_password_change``
-    Password change done    ``admin_password_change_done``
-    i18n javascript         ``admin_jsi18n``
-    Application index page  ``admin_app_list``              ``app_label``
-    ======================  =============================== =============
-
-These names will be prefixed with the name of the :class:`AdminSite` instance,
-plus an underscore. For example, if your :class:`AdminSite` was named
-``custom``, then the Logout view would be served using a URL with the name
-``custom_admin_logout``. The default :class:`AdminSite` doesn't use a prefix
-in it's URL names.
+    ======================  ========================  =============
+    Page                    URL name                  Parameters
+    ======================  ========================  =============
+    Index                   ``index``
+    Logout                  ``logout``
+    Password change         ``password_change``
+    Password change done    ``password_change_done``
+    i18n javascript         ``jsi18n``
+    Application index page  ``app_list``              ``app_label``
+    ======================  ========================  =============
 
 Each :class:`ModelAdmin` instance provides an additional set of named URLs:
 
-    ======================  =====================================================   =============
-    Page                    URL name                                                Parameters
-    ======================  =====================================================   =============
-    Changelist              ``admin_{{ app_label }}_{{ model_name }}_changelist``
-    Add                     ``admin_{{ app_label }}_{{ model_name }}_add``
-    History                 ``admin_{{ app_label }}_{{ model_name }}_history``      ``object_id``
-    Delete                  ``admin_{{ app_label }}_{{ model_name }}_delete``       ``object_id``
-    Change                  ``admin_{{ app_label }}_{{ model_name }}_change``       ``object_id``
-    ======================  =====================================================   =============
+    ======================  ===============================================   =============
+    Page                    URL name                                          Parameters
+    ======================  ===============================================   =============
+    Changelist              ``{{ app_label }}_{{ model_name }}_changelist``
+    Add                     ``{{ app_label }}_{{ model_name }}_add``
+    History                 ``{{ app_label }}_{{ model_name }}_history``      ``object_id``
+    Delete                  ``{{ app_label }}_{{ model_name }}_delete``       ``object_id``
+    Change                  ``{{ app_label }}_{{ model_name }}_change``       ``object_id``
+    ======================  ===============================================   =============
 
-Again, these names will be prefixed by the name of the :class:`AdminSite` in
-which they are deployed.
+These named URLs are registered with the application namespace ``admin``, and
+with an instance namespace corresponding to the name of the Site instance.
 
 So - if you wanted to get a reference to the Change view for a particular
 ``Choice`` object (from the polls application) in the default admin, you would
@@ -1288,8 +1509,16 @@ call::
 
     >>> from django.core import urlresolvers
     >>> c = Choice.objects.get(...)
-    >>> change_url = urlresolvers.reverse('admin_polls_choice_change', args=(c.id,))
+    >>> change_url = urlresolvers.reverse('admin:polls_choice_change', args=(c.id,))
 
-However, if the admin instance was named ``custom``, you would need to call::
+This will find the first registered instance of the admin application (whatever the instance
+name), and resolve to the view for changing ``poll.Choice`` instances in that instance.
 
-    >>> change_url = urlresolvers.reverse('custom_admin_polls_choice_change', args=(c.id,))
+If you want to find a URL in a specific admin instance, provide the name of that instance
+as a ``current_app`` hint to the reverse call. For example, if you specifically wanted
+the admin view from the admin instance named ``custom``, you would need to call::
+
+    >>> change_url = urlresolvers.reverse('custom:polls_choice_change', args=(c.id,))
+
+For more details, see the documentation on :ref:`reversing namespaced URLs
+<topics-http-reversing-url-namespaces>`.

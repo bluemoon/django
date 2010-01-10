@@ -15,7 +15,9 @@ import stat
 import sys
 import urllib
 
+from django.core.management.color import color_style
 from django.utils.http import http_date
+from django.utils._os import safe_join
 
 __version__ = "0.1"
 __all__ = ['WSGIServer','WSGIRequestHandler']
@@ -528,7 +530,7 @@ class WSGIServer(HTTPServer):
         try:
             HTTPServer.server_bind(self)
         except Exception, e:
-            raise WSGIServerException, e
+            raise WSGIServerException(e)
         self.setup_environ()
 
     def setup_environ(self):
@@ -556,6 +558,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         # We set self.path to avoid crashes in log_message() on unsupported
         # requests (like "OPTIONS").
         self.path = ''
+        self.style = color_style()
         BaseHTTPRequestHandler.__init__(self, *args, **kwargs)
 
     def get_environ(self):
@@ -607,7 +610,26 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         # Don't bother logging requests for admin images or the favicon.
         if self.path.startswith(self.admin_media_prefix) or self.path == '/favicon.ico':
             return
-        sys.stderr.write("[%s] %s\n" % (self.log_date_time_string(), format % args))
+
+        msg = "[%s] %s\n" % (self.log_date_time_string(), format % args)
+
+        # Utilize terminal colors, if available
+        if args[1][0] == '2':
+            # Put 2XX first, since it should be the common case
+            msg = self.style.HTTP_SUCCESS(msg)
+        elif args[1][0] == '1':
+            msg = self.style.HTTP_INFO(msg)
+        elif args[1][0] == '3':
+            msg = self.style.HTTP_REDIRECT(msg)
+        elif args[1] == '404':
+            msg = self.style.HTTP_NOT_FOUND(msg)
+        elif args[1][0] == '4':
+            msg = self.style.HTTP_BAD_REQUEST(msg)
+        else:
+            # Any 5XX, or any other response
+            msg = self.style.HTTP_SERVER_ERROR(msg)
+
+        sys.stderr.write(msg)
 
 class AdminMediaHandler(object):
     """
@@ -621,10 +643,24 @@ class AdminMediaHandler(object):
         self.application = application
         if not media_dir:
             import django
-            self.media_dir = django.__path__[0] + '/contrib/admin/media'
+            self.media_dir = \
+                os.path.join(django.__path__[0], 'contrib', 'admin', 'media')
         else:
             self.media_dir = media_dir
         self.media_url = settings.ADMIN_MEDIA_PREFIX
+
+    def file_path(self, url):
+        """
+        Returns the path to the media file on disk for the given URL.
+
+        The passed URL is assumed to begin with ADMIN_MEDIA_PREFIX.  If the
+        resultant file path is outside the media directory, then a ValueError
+        is raised.
+        """
+        # Remove ADMIN_MEDIA_PREFIX.
+        relative_url = url[len(self.media_url):]
+        relative_path = urllib.url2pathname(relative_url)
+        return safe_join(self.media_dir, relative_path)
 
     def __call__(self, environ, start_response):
         import os.path
@@ -636,19 +672,25 @@ class AdminMediaHandler(object):
             return self.application(environ, start_response)
 
         # Find the admin file and serve it up, if it exists and is readable.
-        relative_url = environ['PATH_INFO'][len(self.media_url):]
-        file_path = os.path.join(self.media_dir, relative_url)
+        try:
+            file_path = self.file_path(environ['PATH_INFO'])
+        except ValueError: # Resulting file path was not valid.
+            status = '404 NOT FOUND'
+            headers = {'Content-type': 'text/plain'}
+            output = ['Page not found: %s' % environ['PATH_INFO']]
+            start_response(status, headers.items())
+            return output
         if not os.path.exists(file_path):
             status = '404 NOT FOUND'
             headers = {'Content-type': 'text/plain'}
-            output = ['Page not found: %s' % file_path]
+            output = ['Page not found: %s' % environ['PATH_INFO']]
         else:
             try:
                 fp = open(file_path, 'rb')
             except IOError:
                 status = '401 UNAUTHORIZED'
                 headers = {'Content-type': 'text/plain'}
-                output = ['Permission denied: %s' % file_path]
+                output = ['Permission denied: %s' % environ['PATH_INFO']]
             else:
                 # This is a very simple implementation of conditional GET with
                 # the Last-Modified header. It makes media files a bit speedier

@@ -26,8 +26,11 @@ class BaseDatabaseCreation(object):
         self.connection = connection
 
     def _digest(self, *args):
-        "Generate a 32 bit digest of a set of arguments that can be used to shorten identifying names"
-        return '%x' % (abs(hash(args)) % (1<<32))
+        """
+        Generates a 32-bit digest of a set of arguments that can be used to
+        shorten identifying names.
+        """
+        return '%x' % (abs(hash(args)) % 4294967296L)  # 2**32
 
     def sql_create_model(self, model, style, known_models=set()):
         """
@@ -37,14 +40,14 @@ class BaseDatabaseCreation(object):
         from django.db import models
 
         opts = model._meta
-        if not opts.managed:
+        if not opts.managed or opts.proxy:
             return [], {}
         final_output = []
         table_output = []
         pending_references = {}
         qn = self.connection.ops.quote_name
         for f in opts.local_fields:
-            col_type = f.db_type()
+            col_type = f.db_type(connection=self.connection)
             tablespace = f.db_tablespace or opts.db_tablespace
             if col_type is None:
                 # Skip ManyToManyFields, because they're not represented as
@@ -72,7 +75,7 @@ class BaseDatabaseCreation(object):
             table_output.append(' '.join(field_output))
         if opts.order_with_respect_to:
             table_output.append(style.SQL_FIELD(qn('_order')) + ' ' + \
-                style.SQL_COLTYPE(models.IntegerField().db_type()))
+                style.SQL_COLTYPE(models.IntegerField().db_type(connection=self.connection)))
         for field_constraints in opts.unique_together:
             table_output.append(style.SQL_KEYWORD('UNIQUE') + ' (%s)' % \
                 ", ".join([style.SQL_FIELD(qn(opts.get_field(f).column)) for f in field_constraints]))
@@ -118,7 +121,7 @@ class BaseDatabaseCreation(object):
         "Returns any ALTER TABLE statements to add constraints after the fact."
         from django.db.backends.util import truncate_name
 
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         qn = self.connection.ops.quote_name
         final_output = []
@@ -170,7 +173,7 @@ class BaseDatabaseCreation(object):
                 style.SQL_TABLE(qn(f.m2m_db_table())) + ' (']
             table_output.append('    %s %s %s%s,' %
                 (style.SQL_FIELD(qn('id')),
-                style.SQL_COLTYPE(models.AutoField(primary_key=True).db_type()),
+                style.SQL_COLTYPE(models.AutoField(primary_key=True).db_type(connection=self.connection)),
                 style.SQL_KEYWORD('NOT NULL PRIMARY KEY'),
                 tablespace_sql))
 
@@ -214,14 +217,14 @@ class BaseDatabaseCreation(object):
         table_output = [
             '    %s %s %s %s (%s)%s,' %
                 (style.SQL_FIELD(qn(field.m2m_column_name())),
-                style.SQL_COLTYPE(models.ForeignKey(model).db_type()),
+                style.SQL_COLTYPE(models.ForeignKey(model).db_type(connection=self.connection)),
                 style.SQL_KEYWORD('NOT NULL REFERENCES'),
                 style.SQL_TABLE(qn(opts.db_table)),
                 style.SQL_FIELD(qn(opts.pk.column)),
                 self.connection.ops.deferrable_sql()),
             '    %s %s %s %s (%s)%s,' %
                 (style.SQL_FIELD(qn(field.m2m_reverse_name())),
-                style.SQL_COLTYPE(models.ForeignKey(field.rel.to).db_type()),
+                style.SQL_COLTYPE(models.ForeignKey(field.rel.to).db_type(connection=self.connection)),
                 style.SQL_KEYWORD('NOT NULL REFERENCES'),
                 style.SQL_TABLE(qn(field.rel.to._meta.db_table)),
                 style.SQL_FIELD(qn(field.rel.to._meta.pk.column)),
@@ -233,7 +236,7 @@ class BaseDatabaseCreation(object):
 
     def sql_indexes_for_model(self, model, style):
         "Returns the CREATE INDEX SQL statements for a single model"
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         output = []
         for f in model._meta.local_fields:
@@ -265,7 +268,7 @@ class BaseDatabaseCreation(object):
 
     def sql_destroy_model(self, model, references_to_delete, style):
         "Return the DROP TABLE and restraint dropping statements for a single model"
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         # Drop the table now
         qn = self.connection.ops.quote_name
@@ -283,7 +286,7 @@ class BaseDatabaseCreation(object):
     def sql_remove_table_constraints(self, model, references_to_delete, style):
         from django.db.backends.util import truncate_name
 
-        if not model._meta.managed:
+        if not model._meta.managed or model._meta.proxy:
             return []
         output = []
         qn = self.connection.ops.quote_name
@@ -319,18 +322,16 @@ class BaseDatabaseCreation(object):
         database already exists. Returns the name of the test database created.
         """
         if verbosity >= 1:
-            print "Creating test database..."
+            print "Creating test database '%s'..." % self.connection.alias
 
         test_database_name = self._create_test_db(verbosity, autoclobber)
 
         self.connection.close()
-        settings.DATABASE_NAME = test_database_name
-        self.connection.settings_dict["DATABASE_NAME"] = test_database_name
+        self.connection.settings_dict["NAME"] = test_database_name
         can_rollback = self._rollback_works()
-        settings.DATABASE_SUPPORTS_TRANSACTIONS = can_rollback
-        self.connection.settings_dict["DATABASE_SUPPORTS_TRANSACTIONS"] = can_rollback
+        self.connection.settings_dict["SUPPORTS_TRANSACTIONS"] = can_rollback
 
-        call_command('syncdb', verbosity=verbosity, interactive=False)
+        call_command('syncdb', verbosity=verbosity, interactive=False, database=self.connection.alias)
 
         if settings.CACHE_BACKEND.startswith('db://'):
             from django.core.cache import parse_backend_uri
@@ -347,10 +348,10 @@ class BaseDatabaseCreation(object):
         "Internal implementation - creates the test db tables."
         suffix = self.sql_table_creation_suffix()
 
-        if settings.TEST_DATABASE_NAME:
-            test_database_name = settings.TEST_DATABASE_NAME
+        if self.connection.settings_dict['TEST_NAME']:
+            test_database_name = self.connection.settings_dict['TEST_NAME']
         else:
-            test_database_name = TEST_DATABASE_PREFIX + settings.DATABASE_NAME
+            test_database_name = TEST_DATABASE_PREFIX + self.connection.settings_dict['NAME']
 
         qn = self.connection.ops.quote_name
 
@@ -400,11 +401,10 @@ class BaseDatabaseCreation(object):
         database already exists. Returns the name of the test database created.
         """
         if verbosity >= 1:
-            print "Destroying test database..."
+            print "Destroying test database '%s'..." % self.connection.alias
         self.connection.close()
-        test_database_name = settings.DATABASE_NAME
-        settings.DATABASE_NAME = old_database_name
-        self.connection.settings_dict["DATABASE_NAME"] = old_database_name
+        test_database_name = self.connection.settings_dict['NAME']
+        self.connection.settings_dict['NAME'] = old_database_name
 
         self._destroy_test_db(test_database_name, verbosity)
 
@@ -433,4 +433,3 @@ class BaseDatabaseCreation(object):
     def sql_table_creation_suffix(self):
         "SQL to append to the end of the test table creation statements"
         return ''
-
