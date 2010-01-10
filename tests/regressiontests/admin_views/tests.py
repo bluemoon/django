@@ -2,14 +2,17 @@
 
 import re
 import datetime
-from django.core.files import temp as tempfile
-from django.test import TestCase
-from django.contrib.auth.models import User, Permission
-from django.contrib.contenttypes.models import ContentType
+
+from django.conf import settings
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry, DELETION
 from django.contrib.admin.sites import LOGIN_FORM_KEY
 from django.contrib.admin.util import quote
-from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
+from django.contrib.auth.models import User, Permission
+from django.contrib.contenttypes.models import ContentType
+from django.core.files import temp as tempfile
+from django.db import connection
+from django.test import TestCase
 from django.utils import formats
 from django.utils.cache import get_max_age
 from django.utils.html import escape
@@ -1288,6 +1291,15 @@ class AdminCustomQuerysetTest(TestCase):
                 self.assertContains(response, 'Primary key = %s' % i)
             else:
                 self.assertNotContains(response, 'Primary key = %s' % i)
+
+    def test_changelist_view_count_queries(self):
+        old_debug = settings.DEBUG
+        settings.DEBUG = True
+        num_queries = len(connection.queries)
+        response = self.client.get('/test_admin/admin/admin_views/emptymodel/')
+        # The page should do 5 queries: 1 for the session, 1 for the user, 1
+        # for the count, 1 for user messages, and 1 for the objects on the page
+        self.assertEqual(len(connection.queries), num_queries+5, len(connection.queries) - num_queries)
 
     def test_change_view(self):
         for i in self.pks:

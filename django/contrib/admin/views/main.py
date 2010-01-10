@@ -104,9 +104,11 @@ class ChangeList(object):
 
         # Get the total number of objects, with no admin filters applied.
         # Perform a slight optimization: Check to see whether any filters were
-        # given. If not, use paginator.hits to calculate the number of objects,
-        # because we've already done paginator.hits and the value is cached.
-        if not self.query_set.query.where:
+        # given by the user, if any came from ModelAdmin.queryset() we don't
+        #consider them here. If not, use paginator.hits to calculate the number
+        # of objects, because we've already done paginator.hits and the value
+        # is cached.
+        if not set(self.params) - set([ALL_VAR, ORDER_VAR, ORDER_TYPE_VAR, SEARCH_VAR, IS_POPUP_VAR]):
             full_result_count = result_count
         else:
             full_result_count = self.root_query_set.count()
@@ -191,7 +193,7 @@ class ChangeList(object):
         # Naked except! Because we don't have any other way of validating "params".
         # They might be invalid if the keyword arguments are incorrect, or if the
         # values are not in the correct type, so we might get FieldError, ValueError,
-        # ValicationError, or ? from a custom field that raises yet something else 
+        # ValicationError, or ? from a custom field that raises yet something else
         # when handed impossible data.
         except:
             raise IncorrectLookupParameters
