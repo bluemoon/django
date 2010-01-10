@@ -6,11 +6,6 @@ import datetime
 
 from django.db import models
 
-# Python 2.3 doesn't have sorted()
-try:
-    sorted
-except NameError:
-    from django.utils.itercompat import sorted
 
 class Place(models.Model):
     name = models.CharField(max_length=50)
@@ -385,5 +380,11 @@ AttributeError: 'Person' object has no attribute 'messybachelorparty_set'
 >>> p4.bachelorparty_set.all()
 [<BachelorParty: Bachelor party for Bob>, <BachelorParty: Bachelor party for Dave>]
 
-"""}
+# This works
+>>> Place.objects.exclude(restaurant=None)
+[<Place:  the place>]
 
+# ... and this doesn't.
+>>> Place.objects.filter(restaurant__isnull=False)
+[<Place:  the place>]
+"""}
