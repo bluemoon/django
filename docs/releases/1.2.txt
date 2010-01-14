@@ -49,7 +49,8 @@ Due to new features in the :ttag:`if` template tag, it no longer accepts 'and',
 'or' and 'not' as valid **variable** names. Previously, that worked in some
 cases even though these strings were normally treated as keywords. Now, the
 keyword status is always enforced, and template code such as ``{% if not %}`` or
-``{% if and %}`` will throw a ``TemplateSyntaxError``.
+``{% if and %}`` will throw a ``TemplateSyntaxError``. Also, ``in`` is a new
+keyword and so is not a valid variable name in this context.
 
 ``LazyObject``
 --------------
@@ -358,6 +359,13 @@ The same applies to the globals found in ``django.forms.fields``:
   * ``DEFAULT_DATETIME_INPUT_FORMATS``
 
 Use ``django.utils.formats.get_format()`` to get the appropriate formats.
+
+email_re
+--------
+
+An undocumented regex for validating email addresses has been moved from
+django.form.fields to django.core.validators. You will need to update
+your imports if you are using it.
 
 What's new in Django 1.2
 ========================

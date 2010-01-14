@@ -59,7 +59,7 @@ compatibility.)
 Example::
 
     try:
-        article.full_validate()
+        article.full_clean()
     except ValidationError, e:
         # Do something based on the errors contained in e.error_dict.
         # Display them to a user, or handle them programatically.
@@ -508,9 +508,9 @@ of the view name::
 
     from django.db.models import permalink
 
+    @models.permalink
     def get_absolute_url(self):
         return ('people_view', [str(self.id)])
-    get_absolute_url = permalink(get_absolute_url)
 
 More details on named URL patterns are in the :ref:`URL dispatch documentation
 <topics-http-urls>`.
