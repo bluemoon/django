@@ -123,11 +123,14 @@ class ChangeList(object):
                     qs = qs.distinct()
                     break
         return qs
+    
+    def get_default_ordering(self):
+        return (self.opts.ordering and self.opts.ordering[0]) or "-%s" % self.opts.pk.name
 
     def get_ordering(self):
         ordering_field = self.request.GET.get(ORDER_VAR)
         if not ordering_field:
-            ordering_field = (self.opts.ordering and self.opts.ordering[0]) or "-%s" % self.opts.pk.name
+            ordering_field = self.get_default_ordering()
 
         direction = ""
         if ordering_field[0] == "-":
@@ -201,6 +204,10 @@ class AdminChangeList(ChangeList):
             if spec and spec.has_output():
                 filter_specs.append(spec)
         return filter_specs
+    
+    def get_default_ordering(self):
+        return ((self.model_admin.ordering and self.model_admin.ordering[0]) or
+            super(AdminChangeList, self).get_default_ordering())
 
     def get_query_string(self, new_params=None, remove=None):
         if new_params is None:
