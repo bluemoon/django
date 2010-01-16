@@ -4,7 +4,8 @@ import re
 import datetime
 from django.core.files import temp as tempfile
 from django.test import TestCase
-from django.contrib.auth.models import User, Permission
+from django.contrib.auth import admin # Register auth models with the admin.
+from django.contrib.auth.models import User, Permission, UNUSABLE_PASSWORD
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.admin.models import LogEntry, DELETION
 from django.contrib.admin.sites import LOGIN_FORM_KEY
@@ -288,10 +289,25 @@ class CustomModelAdminTest(AdminViewBasicTest):
         self.assertTemplateUsed(request, 'custom_admin/login.html')
         self.assert_('Hello from a custom login template' in request.content)
 
+    def testCustomAdminSiteLogoutTemplate(self):
+        request = self.client.get('/test_admin/admin2/logout/')
+        self.assertTemplateUsed(request, 'custom_admin/logout.html')
+        self.assert_('Hello from a custom logout template' in request.content)
+
     def testCustomAdminSiteIndexViewAndTemplate(self):
         request = self.client.get('/test_admin/admin2/')
         self.assertTemplateUsed(request, 'custom_admin/index.html')
         self.assert_('Hello from a custom index template *bar*' in request.content)
+
+    def testCustomAdminSitePasswordChangeTemplate(self):
+        request = self.client.get('/test_admin/admin2/password_change/')
+        self.assertTemplateUsed(request, 'custom_admin/password_change_form.html')
+        self.assert_('Hello from a custom password change form template' in request.content)
+
+    def testCustomAdminSitePasswordChangeDoneTemplate(self):
+        request = self.client.get('/test_admin/admin2/password_change/done/')
+        self.assertTemplateUsed(request, 'custom_admin/password_change_done.html')
+        self.assert_('Hello from a custom password change done template' in request.content)
 
     def testCustomAdminSiteView(self):
         self.client.login(username='super', password='secret')
@@ -552,11 +568,11 @@ class AdminViewPermissionsTest(TestCase):
         self.assert_("var hello = 'Hello!';" in request.content)
         self.assertTemplateUsed(request, 'custom_admin/change_list.html')
 
-        # Test custom change form template
+        # Test custom add form template
         request = self.client.get('/test_admin/admin/admin_views/customarticle/add/')
-        self.assertTemplateUsed(request, 'custom_admin/change_form.html')
+        self.assertTemplateUsed(request, 'custom_admin/add_form.html')
 
-        # Add an article so we can test delete and history views
+        # Add an article so we can test delete, change, and history views
         post = self.client.post('/test_admin/admin/admin_views/customarticle/add/', {
             'content': '<p>great article</p>',
             'date_0': '2008-03-18',
@@ -565,7 +581,10 @@ class AdminViewPermissionsTest(TestCase):
         self.assertRedirects(post, '/test_admin/admin/admin_views/customarticle/')
         self.failUnlessEqual(CustomArticle.objects.all().count(), 1)
 
-        # Test custom delete and object history templates
+        # Test custom delete, change, and object history templates
+        # Test custom change form template
+        request = self.client.get('/test_admin/admin/admin_views/customarticle/1/')
+        self.assertTemplateUsed(request, 'custom_admin/change_form.html')
         request = self.client.get('/test_admin/admin/admin_views/customarticle/1/delete/')
         self.assertTemplateUsed(request, 'custom_admin/delete_confirmation.html')
         request = self.client.get('/test_admin/admin/admin_views/customarticle/1/history/')
@@ -1770,3 +1789,40 @@ class ReadonlyTest(TestCase):
         self.assertEqual(Post.objects.count(), 2)
         p = Post.objects.order_by('-id')[0]
         self.assertEqual(p.posted, datetime.date.today())
+
+class IncompleteFormTest(TestCase):
+    """
+    Tests validation of a ModelForm that doesn't explicitly have all data
+    corresponding to model fields. Model validation shouldn't fail
+    such a forms.
+    """
+    fixtures = ['admin-views-users.xml']
+
+    def setUp(self):
+        self.client.login(username='super', password='secret')
+
+    def tearDown(self):
+        self.client.logout()
+
+    def test_user_creation(self):
+        response = self.client.post('/test_admin/admin/auth/user/add/', {
+            'username': 'newuser',
+            'password1': 'newpassword',
+            'password2': 'newpassword',
+            '_continue': '1',
+        })
+        new_user = User.objects.order_by('-id')[0]
+        self.assertRedirects(response, '/test_admin/admin/auth/user/%s/' % new_user.pk)
+        self.assertNotEquals(new_user.password, UNUSABLE_PASSWORD)
+
+    def test_password_mismatch(self):
+        response = self.client.post('/test_admin/admin/auth/user/add/', {
+            'username': 'newuser',
+            'password1': 'newpassword',
+            'password2': 'mismatch',
+        })
+        self.assertEquals(response.status_code, 200)
+        adminform = response.context['adminform']
+        self.assert_('password' not in adminform.form.errors)
+        self.assertEquals(adminform.form.errors['password2'],
+                          [u"The two password fields didn't match."])

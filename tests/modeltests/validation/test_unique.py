@@ -1,4 +1,5 @@
 import unittest
+import datetime
 from django.conf import settings
 from django.db import connection
 from models import CustomPKModel, UniqueTogetherModel, UniqueFieldsModel, UniqueForDateModel, ModelToValidate
@@ -26,8 +27,8 @@ class GetUniqueCheckTests(unittest.TestCase):
     def test_unique_for_date_gets_picked_up(self):
         m = UniqueForDateModel()
         self.assertEqual((
-                [('id',)],
-                [('date', 'count', 'start_date'), ('year', 'count', 'end_date'), ('month', 'order', 'end_date')]
+            [('id',)],
+            [('date', 'count', 'start_date'), ('year', 'count', 'end_date'), ('month', 'order', 'end_date')]
             ), m._get_unique_checks()
         )
 
@@ -42,17 +43,26 @@ class PerformUniqueChecksTest(unittest.TestCase):
         settings.DEBUG = self._old_debug
         super(PerformUniqueChecksTest, self).tearDown()
 
-    def test_primary_key_unique_check_performed_when_adding(self):
-        """Regression test for #12132"""
-        l = len(connection.queries)
+    def test_primary_key_unique_check_not_performed_when_adding_and_pk_not_specified(self):
+        # Regression test for #12560
+        query_count = len(connection.queries)
         mtv = ModelToValidate(number=10, name='Some Name')
         setattr(mtv, '_adding', True)
-        mtv.full_validate()
-        self.assertEqual(l+1, len(connection.queries))
+        mtv.full_clean()
+        self.assertEqual(query_count, len(connection.queries))
+
+    def test_primary_key_unique_check_performed_when_adding_and_pk_specified(self):
+        # Regression test for #12560
+        query_count = len(connection.queries)
+        mtv = ModelToValidate(number=10, name='Some Name', id=123)
+        setattr(mtv, '_adding', True)
+        mtv.full_clean()
+        self.assertEqual(query_count + 1, len(connection.queries))
 
     def test_primary_key_unique_check_not_performed_when_not_adding(self):
-        """Regression test for #12132"""
-        l = len(connection.queries)
+        # Regression test for #12132
+        query_count= len(connection.queries)
         mtv = ModelToValidate(number=10, name='Some Name')
-        mtv.full_validate()
-        self.assertEqual(l, len(connection.queries))
+        mtv.full_clean()
+        self.assertEqual(query_count, len(connection.queries))
+
