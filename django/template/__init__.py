@@ -56,7 +56,7 @@ from django.template.context import Context, RequestContext, ContextPopException
 from django.utils.importlib import import_module
 from django.utils.itercompat import is_iterable
 from django.utils.functional import curry, Promise
-from django.utils.text import smart_split, unescape_string_literal
+from django.utils.text import smart_split, unescape_string_literal, get_text_list
 from django.utils.encoding import smart_unicode, force_unicode, smart_str
 from django.utils.translation import ugettext as _
 from django.utils.safestring import SafeData, EscapeData, mark_safe, mark_for_escaping
@@ -288,7 +288,7 @@ class Parser(object):
                 try:
                     compile_func = self.tags[command]
                 except KeyError:
-                    self.invalid_block_tag(token, command)
+                    self.invalid_block_tag(token, command, parse_until)
                 try:
                     compiled_result = compile_func(self, token)
                 except TemplateSyntaxError, e:
@@ -339,7 +339,9 @@ class Parser(object):
     def empty_block_tag(self, token):
         raise self.error(token, "Empty block tag")
 
-    def invalid_block_tag(self, token, command):
+    def invalid_block_tag(self, token, command, parse_until=None):
+        if parse_until:
+            raise self.error(token, "Invalid block tag: '%s', expected %s" % (command, get_text_list(["'%s'" % p for p in parse_until])))
         raise self.error(token, "Invalid block tag: '%s'" % command)
 
     def unclosed_block_tag(self, parse_until):
@@ -419,6 +421,20 @@ class TokenParser(object):
         "A microparser that parses for a value: some string constant or variable name."
         subject = self.subject
         i = self.pointer
+
+        def next_space_index(subject, i):
+            "Increment pointer until a real space (i.e. a space not within quotes) is encountered"
+            while i < len(subject) and subject[i] not in (' ', '\t'):
+                if subject[i] in ('"', "'"):
+                    c = subject[i]
+                    i += 1
+                    while i < len(subject) and subject[i] != c:
+                        i += 1
+                    if i >= len(subject):
+                        raise TemplateSyntaxError("Searching for value. Unexpected end of string in column %d: %s" % (i, subject))
+            	i += 1
+            return i
+
         if i >= len(subject):
             raise TemplateSyntaxError("Searching for value. Expected another value but found end of string: %s" % subject)
         if subject[i] in ('"', "'"):
@@ -429,6 +445,10 @@ class TokenParser(object):
             if i >= len(subject):
                 raise TemplateSyntaxError("Searching for value. Unexpected end of string in column %d: %s" % (i, subject))
             i += 1
+
+            # Continue parsing until next "real" space, so that filters are also included
+            i = next_space_index(subject, i)
+
             res = subject[p:i]
             while i < len(subject) and subject[i] in (' ', '\t'):
                 i += 1
@@ -437,15 +457,7 @@ class TokenParser(object):
             return res
         else:
             p = i
-            while i < len(subject) and subject[i] not in (' ', '\t'):
-                if subject[i] in ('"', "'"):
-                    c = subject[i]
-                    i += 1
-                    while i < len(subject) and subject[i] != c:
-                        i += 1
-                    if i >= len(subject):
-                        raise TemplateSyntaxError("Searching for value. Unexpected end of string in column %d: %s" % (i, subject))
-                i += 1
+            i = next_space_index(subject, i)
             s = subject[p:i]
             while i < len(subject) and subject[i] in (' ', '\t'):
                 i += 1
@@ -539,8 +551,8 @@ class FilterExpression(object):
                 elif var_arg:
                     args.append((True, Variable(var_arg)))
                 filter_func = parser.find_filter(filter_name)
-                self.args_check(filter_name,filter_func, args)
-                filters.append( (filter_func,args))
+                self.args_check(filter_name, filter_func, args)
+                filters.append((filter_func, args))
             upto = match.end()
         if upto != len(token):
             raise TemplateSyntaxError("Could not parse the remainder: '%s' from '%s'" % (token[upto:], token))
@@ -809,7 +821,7 @@ class TextNode(Node):
 
     def render(self, context):
         return self.s
-    
+
 def _render_value_in_context(value, context):
     """
     Converts any value to a string to become part of a rendered template. This
@@ -966,22 +978,70 @@ class Library(object):
             return func
         return dec
 
-def get_library(module_name):
-    lib = libraries.get(module_name, None)
+def import_library(taglib_module):
+    """Load a template tag library module.
+
+    Verifies that the library contains a 'register' attribute, and
+    returns that attribute as the representation of the library
+    """
+    try:
+        mod = import_module(taglib_module)
+    except ImportError:
+        return None
+    try:
+        return mod.register
+    except AttributeError:
+        raise InvalidTemplateLibrary("Template library %s does not have a variable named 'register'" % taglib_module)
+
+templatetags_modules = []
+
+def get_templatetags_modules():
+    """Return the list of all available template tag modules.
+
+    Caches the result for faster access.
+    """
+    global templatetags_modules
+    if not templatetags_modules:
+        _templatetags_modules = []
+        # Populate list once per thread.
+        for app_module in ['django'] + list(settings.INSTALLED_APPS):
+            try:
+                templatetag_module = '%s.templatetags' % app_module
+                import_module(templatetag_module)
+                _templatetags_modules.append(templatetag_module)
+            except ImportError:
+                continue
+        templatetags_modules = _templatetags_modules
+    return templatetags_modules
+
+def get_library(library_name):
+    """
+    Load the template library module with the given name.
+
+    If library is not already loaded loop over all templatetags modules to locate it.
+
+    {% load somelib %} and {% load someotherlib %} loops twice.
+
+    Subsequent loads eg. {% load somelib %} in the same process will grab the cached
+    module from libraries.
+    """
+    lib = libraries.get(library_name, None)
     if not lib:
-        try:
-            mod = import_module(module_name)
-        except ImportError, e:
-            raise InvalidTemplateLibrary("Could not load template library from %s, %s" % (module_name, e))
-        try:
-            lib = mod.register
-            libraries[module_name] = lib
-        except AttributeError:
-            raise InvalidTemplateLibrary("Template library %s does not have a variable named 'register'" % module_name)
+        templatetags_modules = get_templatetags_modules()
+        tried_modules = []
+        for module in templatetags_modules:
+            taglib_module = '%s.%s' % (module, library_name)
+            tried_modules.append(taglib_module)
+            lib = import_library(taglib_module)
+            if lib:
+                libraries[library_name] = lib
+                break
+        if not lib:
+            raise InvalidTemplateLibrary("Template library %s not found, tried %s" % (library_name, ','.join(tried_modules)))
     return lib
 
-def add_to_builtins(module_name):
-    builtins.append(get_library(module_name))
+def add_to_builtins(module):
+    builtins.append(import_library(module))
 
 add_to_builtins('django.template.defaulttags')
 add_to_builtins('django.template.defaultfilters')

@@ -3,10 +3,6 @@
 import sys
 import re
 from itertools import cycle as itertools_cycle
-try:
-    reversed
-except NameError:
-    from django.utils.itercompat import reversed     # Python 2.3 fallback
 
 from django.template import Node, NodeList, Template, Context, Variable
 from django.template import TemplateSyntaxError, VariableDoesNotExist, BLOCK_TAG_START, BLOCK_TAG_END, VARIABLE_TAG_START, VARIABLE_TAG_END, SINGLE_BRACE_START, SINGLE_BRACE_END, COMMENT_TAG_START, COMMENT_TAG_END
@@ -920,7 +916,7 @@ def load(parser, token):
     for taglib in bits[1:]:
         # add the library to the parser
         try:
-            lib = get_library("django.templatetags.%s" % taglib)
+            lib = get_library(taglib)
             parser.add_library(lib)
         except InvalidTemplateLibrary, e:
             raise TemplateSyntaxError("'%s' is not a valid tag library: %s" %
