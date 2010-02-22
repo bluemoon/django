@@ -22,7 +22,7 @@ from django.utils.tzinfo import LocalTimezone
 
 from context import context_tests
 from custom import custom_filters
-from parser import filter_parsing, variable_parsing
+from parser import token_parsing, filter_parsing, variable_parsing
 from unicode import unicode_tests
 from smartif import *
 
@@ -37,7 +37,9 @@ import filters
 __test__ = {
     'unicode': unicode_tests,
     'context': context_tests,
+    'token_parsing': token_parsing,
     'filter_parsing': filter_parsing,
+    'variable_parsing': variable_parsing,
     'custom_filters': custom_filters,
 }
 
@@ -59,7 +61,7 @@ def do_echo(parser, token):
 
 register.tag("echo", do_echo)
 
-template.libraries['django.templatetags.testtags'] = register
+template.libraries['testtags'] = register
 
 #####################################
 # Helper objects for template tests #
@@ -180,6 +182,14 @@ class Templates(unittest.TestCase):
 
         settings.SETTINGS_MODULE = old_settings_module
         settings.TEMPLATE_DEBUG = old_template_debug
+
+    def test_invalid_block_suggestion(self):
+        # See #7876
+        from django.template import Template, TemplateSyntaxError
+        try:
+            t = Template("{% if 1 %}lala{% endblock %}{% endif %}")
+        except TemplateSyntaxError, e:
+            self.assertEquals(e.args[0], "Invalid block tag: 'endblock', expected 'else' or 'endif'")
 
     def test_templates(self):
         template_tests = self.get_template_tests()
@@ -896,6 +906,11 @@ class Templates(unittest.TestCase):
             'i18n20': ('{% load i18n %}{% trans andrew %}', {'andrew': 'a & b'}, u'a &amp; b'),
             'i18n21': ('{% load i18n %}{% blocktrans %}{{ andrew }}{% endblocktrans %}', {'andrew': mark_safe('a & b')}, u'a & b'),
             'i18n22': ('{% load i18n %}{% trans andrew %}', {'andrew': mark_safe('a & b')}, u'a & b'),
+
+            # Use filters with the {% trans %} tag, #5972
+            'i18n23': ('{% load i18n %}{% trans "Page not found"|capfirst|slice:"6:" %}', {'LANGUAGE_CODE': 'de'}, u'nicht gefunden'),
+            'i18n24': ("{% load i18n %}{% trans 'Page not found'|upper %}", {'LANGUAGE_CODE': 'de'}, u'SEITE NICHT GEFUNDEN'),
+            'i18n25': ('{% load i18n %}{% trans somevar|upper %}', {'somevar': 'Page not found', 'LANGUAGE_CODE': 'de'}, u'SEITE NICHT GEFUNDEN'),
 
             ### HANDLING OF TEMPLATE_STRING_IF_INVALID ###################################
 

@@ -10,8 +10,11 @@ from django.http import HttpResponseRedirect, Http404
 from django.shortcuts import render_to_response, get_object_or_404
 from django.template import RequestContext
 from django.utils.html import escape
+from django.utils.decorators import method_decorator
 from django.utils.translation import ugettext, ugettext_lazy as _
 from django.views.decorators.csrf import csrf_protect
+
+csrf_protect_m = method_decorator(csrf_protect)
 
 class GroupAdmin(admin.ModelAdmin):
     search_fields = ('name',)
@@ -62,11 +65,11 @@ class UserAdmin(admin.ModelAdmin):
         Use special form during user creation
         """
         defaults = {}
-        if not obj:
-            defaults = {
-                'form': UserCreationForm,
-                'fields': ['username'],
-            }
+        if obj is None:
+            defaults.update({
+                'form': self.add_form,
+                'fields': admin.util.flatten_fieldsets(self.add_fieldsets),
+            })
         defaults.update(kwargs)
         return super(UserAdmin, self).get_form(request, obj, **defaults)
 
@@ -76,7 +79,7 @@ class UserAdmin(admin.ModelAdmin):
             (r'^(\d+)/password/$', self.admin_site.admin_view(self.user_change_password))
         ) + super(UserAdmin, self).get_urls()
 
-    @csrf_protect
+    @csrf_protect_m
     @transaction.commit_on_success
     def add_view(self, request, form_url='', extra_context=None):
         # It's an error for a user to have add permission but NOT change
@@ -116,7 +119,6 @@ class UserAdmin(admin.ModelAdmin):
 
         fieldsets = [(None, {'fields': form.base_fields.keys()})]
         adminForm = admin.helpers.AdminForm(form, fieldsets, {})
-        print adminForm, form
 
         return render_to_response(self.change_user_password_template or 'admin/auth/user/change_password.html', {
             'title': _('Change password: %s') % escape(user.username),

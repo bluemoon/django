@@ -198,7 +198,7 @@ class Client(object):
         using the arguments to the request.
         """
         environ = {
-            'HTTP_COOKIE':      self.cookies,
+            'HTTP_COOKIE':       self.cookies.output(header='', sep='; '),
             'PATH_INFO':         '/',
             'QUERY_STRING':      '',
             'REMOTE_ADDR':       '127.0.0.1',
@@ -470,11 +470,15 @@ class Client(object):
             redirect_chain = response.redirect_chain
             redirect_chain.append((url, response.status_code))
 
+            extra = {}
+            if scheme:
+                extra['wsgi.url_scheme'] = scheme
+
             # The test client doesn't handle external links,
             # but since the situation is simulated in test_client,
             # we fake things here by ignoring the netloc portion of the
             # redirected URL.
-            response = self.get(path, QueryDict(query), follow=False)
+            response = self.get(path, QueryDict(query), follow=False, **extra)
             response.redirect_chain = redirect_chain
 
             # Prevent loops

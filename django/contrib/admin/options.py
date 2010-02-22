@@ -13,6 +13,7 @@ from django.db import models, transaction
 from django.db.models.fields import BLANK_CHOICE_DASH
 from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render_to_response
+from django.utils.decorators import method_decorator
 from django.utils.datastructures import SortedDict
 from django.utils.functional import update_wrapper
 from django.utils.html import escape
@@ -53,6 +54,7 @@ FORMFIELD_FOR_DBFIELD_DEFAULTS = {
     models.FileField:       {'widget': widgets.AdminFileWidget},
 }
 
+csrf_protect_m = method_decorator(csrf_protect)
 
 class BaseModelAdmin(object):
     """Functionality common to both ModelAdmin and InlineAdmin."""
@@ -268,7 +270,7 @@ class ModelAdmin(BaseModelAdmin):
 
         js = ['js/core.js', 'js/admin/RelatedObjectLookups.js']
         if self.actions is not None:
-            js.extend(['js/getElementsBySelector.js', 'js/actions.js'])
+            js.extend(['js/jquery.min.js', 'js/actions.min.js'])
         if self.prepopulated_fields:
             js.append('js/urlify.js')
         if self.opts.get_ordered_objects():
@@ -724,18 +726,24 @@ class ModelAdmin(BaseModelAdmin):
         # If the form's valid we can handle the action.
         if action_form.is_valid():
             action = action_form.cleaned_data['action']
+            select_across = action_form.cleaned_data['select_across']
             func, name, description = self.get_actions(request)[action]
 
             # Get the list of selected PKs. If nothing's selected, we can't
-            # perform an action on it, so bail.
+            # perform an action on it, so bail. Except we want to perform
+            # the action explicitely on all objects.
             selected = request.POST.getlist(helpers.ACTION_CHECKBOX_NAME)
-            if not selected:
+            if not selected and not select_across:
                 # Reminder that something needs to be selected or nothing will happen
                 msg = _("Items must be selected in order to perform actions on them. No items have been changed.")
                 self.message_user(request, msg)
                 return None
 
-            response = func(self, request, queryset.filter(pk__in=selected))
+            if not select_across:
+                # Perform the action only on the selected objects
+                queryset = queryset.filter(pk__in=selected)
+
+            response = func(self, request, queryset)
 
             # Actions may return an HttpResponse, which will be used as the
             # response from the POST. If not, we'll be a good little HTTP
@@ -748,7 +756,7 @@ class ModelAdmin(BaseModelAdmin):
             msg = _("No action selected.")
             self.message_user(request, msg)
 
-    @csrf_protect
+    @csrf_protect_m
     @transaction.commit_on_success
     def add_view(self, request, form_url='', extra_context=None):
         "The 'add' admin view for this model."
@@ -838,7 +846,7 @@ class ModelAdmin(BaseModelAdmin):
         context.update(extra_context or {})
         return self.render_change_form(request, context, form_url=form_url, add=True)
 
-    @csrf_protect
+    @csrf_protect_m
     @transaction.commit_on_success
     def change_view(self, request, object_id, extra_context=None):
         "The 'change' admin view for this model."
@@ -930,7 +938,7 @@ class ModelAdmin(BaseModelAdmin):
         context.update(extra_context or {})
         return self.render_change_form(request, context, change=True, obj=obj)
 
-    @csrf_protect
+    @csrf_protect_m
     def changelist_view(self, request, extra_context=None):
         "The 'change list' admin view for this model."
         from django.contrib.admin.views.main import ERROR_FLAG
@@ -1051,7 +1059,7 @@ class ModelAdmin(BaseModelAdmin):
             'admin/change_list.html'
         ], context, context_instance=context_instance)
 
-    @csrf_protect
+    @csrf_protect_m
     def delete_view(self, request, object_id, extra_context=None):
         "The 'delete' admin view for this model."
         opts = self.model._meta
@@ -1187,7 +1195,7 @@ class InlineModelAdmin(BaseModelAdmin):
 
     def _media(self):
         from django.conf import settings
-        js = []
+        js = ['js/jquery.min.js', 'js/inlines.min.js']
         if self.prepopulated_fields:
             js.append('js/urlify.js')
         if self.filter_vertical or self.filter_horizontal:
