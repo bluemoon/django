@@ -954,7 +954,8 @@ class ValuesListQuerySet(ValuesQuerySet):
             # If a field list has been specified, use it. Otherwise, use the
             # full list of fields, including extras and aggregates.
             if self._fields:
-                fields = self._fields
+                fields = list(self._fields) + filter(lambda f: f not in self._fields,
+                                                     aggregate_names)
             else:
                 fields = names
 
@@ -1333,6 +1334,9 @@ class RawQuerySet(object):
 
     def __repr__(self):
         return "<RawQuerySet: %r>" % (self.raw_query % self.params)
+
+    def __getitem__(self, k):
+        return list(self)[k]
 
     @property
     def db(self):
