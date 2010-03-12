@@ -2,6 +2,7 @@
 
 import os
 import time
+import shutil
 try:
     import cPickle as pickle
 except ImportError:
@@ -129,7 +130,7 @@ class CacheClass(BaseCache):
         try:
             os.makedirs(self._dir)
         except OSError:
-            raise EnvironmentError, "Cache directory '%s' does not exist and could not be created'" % self._dir
+            raise EnvironmentError("Cache directory '%s' does not exist and could not be created'" % self._dir)
 
     def _key_to_file(self, key):
         """
@@ -150,3 +151,9 @@ class CacheClass(BaseCache):
             count += len(files)
         return count
     _num_entries = property(_get_num_entries)
+
+    def clear(self):
+        try:
+            shutil.rmtree(self._dir)
+        except (IOError, OSError):
+            pass

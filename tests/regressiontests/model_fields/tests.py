@@ -6,7 +6,7 @@ from django import forms
 from django.db import models
 from django.core.exceptions import ValidationError
 
-from models import Foo, Bar, Whiz, BigD, BigS, Image, BigInt, Post
+from models import Foo, Bar, Whiz, BigD, BigS, Image, BigInt, Post, NullBooleanModel
 
 try:
     from decimal import Decimal
@@ -25,6 +25,32 @@ if Image:
             ImageFieldUsingFileTests, \
             TwoImageFieldTests
 
+
+class BasicFieldTests(django.test.TestCase):
+    def test_show_hidden_initial(self):
+        """
+        Regression test for #12913. Make sure fields with choices respect
+        show_hidden_initial as a kwarg to models.Field.formfield()
+        """
+        choices = [(0, 0), (1, 1)]
+        model_field = models.Field(choices=choices)
+        form_field = model_field.formfield(show_hidden_initial=True)
+        self.assertTrue(form_field.show_hidden_initial)
+
+        form_field = model_field.formfield(show_hidden_initial=False)
+        self.assertFalse(form_field.show_hidden_initial)
+
+    def test_nullbooleanfield_blank(self):
+        """
+        Regression test for #13071: NullBooleanField should not throw
+        a validation error when given a value of None.
+        
+        """
+        nullboolean = NullBooleanModel(nbfield=None)
+        try:
+            nullboolean.full_clean()
+        except ValidationError, e:
+            self.fail("NullBooleanField failed validation with value of None: %s" % e.messages)
 
 class DecimalFieldTests(django.test.TestCase):
     def test_to_python(self):
@@ -108,11 +134,21 @@ class BooleanFieldTests(unittest.TestCase):
         self.assertEqual(f.get_db_prep_lookup('exact', 0, connection=connection), [False])
         self.assertEqual(f.get_db_prep_lookup('exact', None, connection=connection), [None])
 
+    def _test_to_python(self, f):
+        self.assertTrue(f.to_python(1) is True)
+        self.assertTrue(f.to_python(0) is False)
+
     def test_booleanfield_get_db_prep_lookup(self):
         self._test_get_db_prep_lookup(models.BooleanField())
 
     def test_nullbooleanfield_get_db_prep_lookup(self):
         self._test_get_db_prep_lookup(models.NullBooleanField())
+
+    def test_booleanfield_to_python(self):
+        self._test_to_python(models.BooleanField())
+
+    def test_nullbooleanfield_to_python(self):
+        self._test_to_python(models.NullBooleanField())
 
     def test_booleanfield_choices_blank(self):
         """
@@ -173,6 +209,10 @@ class ValidationTest(django.test.TestCase):
         f = models.CharField(choices=[('a','A'), ('b','B')])
         self.assertRaises(ValidationError, f.clean, "not a", None)
 
+    def test_choices_validation_supports_named_groups(self):
+        f = models.IntegerField(choices=(('group',((10,'A'),(20,'B'))),(30,'C')))
+        self.assertEqual(10, f.clean(10, None))
+
     def test_nullable_integerfield_raises_error_with_blank_false(self):
         f = models.IntegerField(null=True, blank=False)
         self.assertRaises(ValidationError, f.clean, None, None)
@@ -202,7 +242,7 @@ class ValidationTest(django.test.TestCase):
 class BigIntegerFieldTests(django.test.TestCase):
     def test_limits(self):
         # Ensure that values that are right at the limits can be saved
-        # and then retrieved without corruption. 
+        # and then retrieved without corruption.
         maxval = 9223372036854775807
         minval = -maxval - 1
         BigInt.objects.create(value=maxval)
@@ -236,7 +276,7 @@ class TypeCoercionTests(django.test.TestCase):
     """
     def test_lookup_integer_in_charfield(self):
         self.assertEquals(Post.objects.filter(title=9).count(), 0)
-        
+
     def test_lookup_integer_in_textfield(self):
         self.assertEquals(Post.objects.filter(body=24).count(), 0)
-        
+

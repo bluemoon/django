@@ -37,8 +37,11 @@ class AdminSite(object):
     """
 
     index_template = None
-    login_template = None
     app_index_template = None
+    login_template = None
+    logout_template = None
+    password_change_template = None
+    password_change_done_template = None
 
     def __init__(self, name=None, app_name='admin'):
         self._registry = {} # model_class class -> admin_class instance
@@ -152,11 +155,15 @@ class AdminSite(object):
         from django.contrib.contenttypes.models import ContentType
 
         if not LogEntry._meta.installed:
-            raise ImproperlyConfigured("Put 'django.contrib.admin' in your INSTALLED_APPS setting in order to use the admin application.")
+            raise ImproperlyConfigured("Put 'django.contrib.admin' in your "
+                "INSTALLED_APPS setting in order to use the admin application.")
         if not ContentType._meta.installed:
-            raise ImproperlyConfigured("Put 'django.contrib.contenttypes' in your INSTALLED_APPS setting in order to use the admin application.")
-        if 'django.core.context_processors.auth' not in settings.TEMPLATE_CONTEXT_PROCESSORS:
-            raise ImproperlyConfigured("Put 'django.core.context_processors.auth' in your TEMPLATE_CONTEXT_PROCESSORS setting in order to use the admin application.")
+            raise ImproperlyConfigured("Put 'django.contrib.contenttypes' in "
+                "your INSTALLED_APPS setting in order to use the admin application.")
+        if not ('django.contrib.auth.context_processors.auth' in settings.TEMPLATE_CONTEXT_PROCESSORS or
+            'django.core.context_processors.auth' in settings.TEMPLATE_CONTEXT_PROCESSORS):
+            raise ImproperlyConfigured("Put 'django.contrib.auth.context_processors.auth' "
+                "in your TEMPLATE_CONTEXT_PROCESSORS setting in order to use the admin application.")
 
     def admin_view(self, view, cacheable=False):
         """
@@ -189,7 +196,8 @@ class AdminSite(object):
             inner = never_cache(inner)
         # We add csrf_protect here so this function can be used as a utility
         # function for any view, without having to repeat 'csrf_protect'.
-        inner = csrf_protect(inner)
+        if not getattr(view, 'csrf_exempt', False):
+            inner = csrf_protect(inner)
         return update_wrapper(inner, view)
 
     def get_urls(self):
@@ -248,14 +256,22 @@ class AdminSite(object):
             url = '%spassword_change/done/' % self.root_path
         else:
             url = reverse('admin:password_change_done', current_app=self.name)
-        return password_change(request, post_change_redirect=url)
+        defaults = {
+            'post_change_redirect': url
+        }
+        if self.password_change_template is not None:
+            defaults['template_name'] = self.password_change_template
+        return password_change(request, **defaults)
 
     def password_change_done(self, request):
         """
         Displays the "success" page after a password change.
         """
         from django.contrib.auth.views import password_change_done
-        return password_change_done(request)
+        defaults = {}
+        if self.password_change_done_template is not None:
+            defaults['template_name'] = self.password_change_done_template
+        return password_change_done(request, **defaults)
 
     def i18n_javascript(self, request):
         """
@@ -277,7 +293,10 @@ class AdminSite(object):
         This should *not* assume the user is already logged in.
         """
         from django.contrib.auth.views import logout
-        return logout(request)
+        defaults = {}
+        if self.logout_template is not None:
+            defaults['template_name'] = self.logout_template
+        return logout(request, **defaults)
     logout = never_cache(logout)
 
     def login(self, request):

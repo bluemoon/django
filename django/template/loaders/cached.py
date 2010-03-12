@@ -31,15 +31,15 @@ class Loader(BaseLoader):
                 return (template, make_origin(display_name, loader, name, dirs))
             except TemplateDoesNotExist:
                 pass
-        raise TemplateDoesNotExist, name
+        raise TemplateDoesNotExist(name)
 
     def load_template(self, template_name, template_dirs=None):
         if template_name not in self.template_cache:
             template, origin = self.find_template(template_name, template_dirs)
             if not hasattr(template, 'render'):
                 template = get_template_from_string(template, origin, template_name)
-            self.template_cache[template_name] = (template, origin)
-        return self.template_cache[template_name]
+            self.template_cache[template_name] = template
+        return self.template_cache[template_name], None
 
     def reset(self):
         "Empty the template cache."

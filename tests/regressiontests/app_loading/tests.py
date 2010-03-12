@@ -10,7 +10,7 @@ Test the globbing of INSTALLED_APPS.
 >>> old_sys_path = sys.path
 >>> sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
->>> old_tz = os.environ["TZ"]
+>>> old_tz = os.environ.get("TZ")
 >>> settings = Settings('test_settings')
 
 >>> settings.INSTALLED_APPS
@@ -19,7 +19,7 @@ Test the globbing of INSTALLED_APPS.
 >>> sys.path = old_sys_path
 
 # Undo a side-effect of installing a new settings object.
->>> if hasattr(time, "tzset"):
+>>> if hasattr(time, "tzset") and old_tz:
 ...     os.environ["TZ"] = old_tz
 ...     time.tzset()
 

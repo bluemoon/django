@@ -326,12 +326,11 @@ Notes on specific fields
 Boolean fields
 ~~~~~~~~~~~~~~
 
-Since MySQL doesn't have a direct ``BOOLEAN`` column type, Django uses a
-``TINYINT`` column with values of ``1`` and ``0`` to store values for the
-:class:`~django.db.models.BooleanField` model field. Refer to the documentation
-of that field for more details, but usually this won't be something that will
-matter unless you're printing out the field values and are expecting to see
-``True`` and ``False.``.
+.. versionchanged:: 1.2
+
+In previous versions of Django when running under MySQL ``BooleanFields`` would
+return their data as ``ints``, instead of true ``bools``.  See the release
+notes for a complete description of the change.
 
 Character fields
 ~~~~~~~~~~~~~~~~
@@ -607,6 +606,14 @@ Naming issues
 Oracle imposes a name length limit of 30 characters. To accommodate this, the
 backend truncates database identifiers to fit, replacing the final four
 characters of the truncated name with a repeatable MD5 hash value.
+
+When running syncdb, an ``ORA-06552`` error may be encountered if
+certain Oracle keywords are used as the name of a model field or the
+value of a ``db_column`` option.  Django quotes all identifiers used
+in queries to prevent most such problems, but this error can still
+occur when an Oracle datatype is used as a column name.  In
+particular, take care to avoid using the names ``date``,
+``timestamp``, ``number`` or ``float`` as a field name.
 
 NULL and empty strings
 ----------------------

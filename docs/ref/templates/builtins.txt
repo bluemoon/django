@@ -440,6 +440,11 @@ how ``x in y`` will be interpreted::
       instance that belongs to the QuerySet.
     {% endif %}
 
+``not in`` operator
+~~~~~~~~~~~~~~~~~~~~
+
+Not contained within.  This is the negation of the ``in`` operator.
+
 
 The comparison operators cannot be 'chained' like in Python or in mathematical
 notation. For example, instead of using::
@@ -891,12 +896,18 @@ Returns an absolute URL (i.e., a URL without the domain name) matching a given
 view function and optional parameters. This is a way to output links without
 violating the DRY principle by having to hard-code URLs in your templates::
 
-    {% url path.to.some_view arg1,arg2,name1=value1 %}
+    {% url path.to.some_view v1,v2 %}
 
 The first argument is a path to a view function in the format
 ``package.package.module.function``. Additional arguments are optional and
-should be comma-separated values that will be used as positional and keyword
-arguments in the URL. All arguments required by the URLconf should be present.
+should be comma-separated values that will be used as arguments in the URL.
+The example above shows passing positional arguments. Alternatively you may
+use keyword syntax::
+
+    {% url path.to.some_view arg1=v1,arg2=v2 %}
+
+Do not mix both positional and keyword syntax in a single call. All arguments 
+required by the URLconf should be present. 
 
 For example, suppose you have a view, ``app_views.client``, whose URLconf
 takes a client ID (here, ``client()`` is a method inside the views file
@@ -1010,12 +1021,39 @@ For example::
 
 If ``value`` is ``4``, then the output will be ``6``.
 
+.. versionchanged:: 1.2
+   The following behavior didn't exist in previous Django versions.
+
+This filter will first try to coerce both values to integers. If this fails,
+it'll attempt to add the values together anyway. This will work on some data
+types (strings, list, etc.) and fail on others. If it fails, the result will
+be an empty string.
+
+For example, if we have::
+
+    {{ first|add:second }}
+
+and ``first`` is ``[1, 2, 3]`` and ``second`` is ``[4, 5, 6]``, then the
+output will be ``[1, 2, 3, 4, 5, 6]``.
+
+.. warning::
+
+    Keep in mind that strings that can both be coerced to integers will be,
+    and thus will be will be *summed*, not concatenated, as in the first
+    example above.
+
 .. templatefilter:: addslashes
 
 addslashes
 ~~~~~~~~~~
 
 Adds slashes before quotes. Useful for escaping strings in CSV, for example.
+
+For example::
+
+    {{ value|addslashes }}
+
+If ``value`` is ``"I'm using Django"``, the output will be ``"I\'m using Django"``.
 
 .. templatefilter:: capfirst
 
@@ -1024,12 +1062,24 @@ capfirst
 
 Capitalizes the first character of the value.
 
+For example::
+
+    {{ value|capfirst }}
+
+If ``value`` is ``"django"``, the output will be ``"Django"``.
+
 .. templatefilter:: center
 
 center
 ~~~~~~
 
 Centers the value in a field of a given width.
+
+For example::
+
+    "{{ value|center:"15" }}"
+
+If ``value`` is ``"Django"``, the output will be ``"     Django    "``.
 
 .. templatefilter:: cut
 
@@ -1064,12 +1114,25 @@ If ``value`` is a ``datetime`` object (e.g., the result of
 ``datetime.datetime.now()``), the output will be the string
 ``'Wed 09 Jan 2008'``.
 
+Another example:
+
+Assuming that :setting:`USE_L10N` is ``True`` and :setting:`LANGUAGE_CODE` is,
+for example, ``"es"``, then for::
+
+    {{ value|date:"SHORT_DATE_FORMAT" }}
+
+the output will be the string ``"09/01/2008"`` (The ``"SHORT_DATE_FORMAT"``
+format specifier for the ``es`` locale as shipped with Django is ``"d/m/Y"``).
+
 When used without a format string::
 
     {{ value|date }}
 
 ...the formatting string defined in the :setting:`DATE_FORMAT` setting will be
 used, without applying any localization.
+
+.. versionchanged:: 1.2
+    Predefined formats can now be influenced by the current locale.
 
 .. templatefilter:: default
 
@@ -1193,6 +1256,13 @@ escapejs
 Escapes characters for use in JavaScript strings. This does *not* make the
 string safe for use in HTML, but does protect you from syntax errors when using
 templates to generate JavaScript/JSON.
+
+For example::
+
+    {{ value|escapejs }}
+
+If ``value`` is ``"testing\r\njavascript \'string" <b>escaping</b>"``,
+the output will be ``"testing\\x0D\\x0Ajavascript \\x27string\\x22 \\x3Cb\\x3Eescaping\\x3C/b\\x3E"``.
 
 .. templatefilter:: filesizeformat
 
@@ -1320,6 +1390,12 @@ strings containing non-ASCII characters in a URL.
 It's safe to use this filter on a string that has already gone through the
 ``urlencode`` filter.
 
+For example::
+
+    {{ value|iriencode }}
+
+If ``value`` is ``"?test=1&me=2"``, the output will be ``"?test=1&amp;me=2"``.
+
 .. templatefilter:: join
 
 join
@@ -1400,12 +1476,35 @@ linebreaksbr
 Converts all newlines in a piece of plain text to HTML line breaks
 (``<br />``).
 
+For example::
+
+    {{ value|linebreaksbr }}
+
+If ``value`` is ``Joel\nis a slug``, the output will be ``Joel<br />is a
+slug``.
+
 .. templatefilter:: linenumbers
 
 linenumbers
 ~~~~~~~~~~~
 
 Displays text with line numbers.
+
+For example::
+
+    {{ value|linenumbers }}
+
+If ``value`` is::
+
+    one
+    two
+    three
+
+the output will be::
+
+    1. one
+    2. two
+    3. three
 
 .. templatefilter:: ljust
 
@@ -1415,6 +1514,12 @@ ljust
 Left-aligns the value in a field of a given width.
 
 **Argument:** field size
+
+For example::
+
+    "{{ value|ljust:"10" }}"
+
+If ``value`` is ``Django``, the output will be ``"Django    "``.
 
 .. templatefilter:: lower
 
@@ -1451,11 +1556,16 @@ phone2numeric
 ~~~~~~~~~~~~~
 
 Converts a phone number (possibly containing letters) to its numerical
-equivalent. For example, ``'800-COLLECT'`` will be converted to
-``'800-2655328'``.
+equivalent.
 
 The input doesn't have to be a valid phone number. This will happily convert
 any string.
+
+For example::
+
+    {{ value|phone2numeric }}
+
+If ``value`` is ``800-COLLECT``, the output will be ``800-2655328``.
 
 .. templatefilter:: pluralize
 
@@ -1467,6 +1577,9 @@ Returns a plural suffix if the value is not 1. By default, this suffix is ``'s'`
 Example::
 
     You have {{ num_messages }} message{{ num_messages|pluralize }}.
+
+If ``num_messages`` is ``1``, the output will be ``You have 1 message.``
+If ``num_messages`` is ``2``  the output will be ``You have 2 messages.``
 
 For words that require a suffix other than ``'s'``, you can provide an alternate
 suffix as a parameter to the filter.
@@ -1527,6 +1640,12 @@ Right-aligns the value in a field of a given width.
 
 **Argument:** field size
 
+For example::
+
+    "{{ value|rjust:"10" }}"
+
+If ``value`` is ``Django``, the output will be ``"    Django"``.
+
 .. templatefilter:: safe
 
 safe
@@ -1564,6 +1683,8 @@ for an introduction.
 Example::
 
     {{ some_list|slice:":2" }}
+
+If ``some_list`` is ``['a', 'b', 'c']``, the output will be ``['a', 'b']``.
 
 .. templatefilter:: slugify
 
@@ -1633,12 +1754,25 @@ For example::
 If ``value`` is equivalent to ``datetime.datetime.now()``, the output will be
 the string ``"01:23"``.
 
+Another example:
+
+Assuming that :setting:`USE_L10N` is ``True`` and :setting:`LANGUAGE_CODE` is,
+for example, ``"de"``, then for::
+
+    {{ value|time:"TIME_FORMAT" }}
+
+the output will be the string ``"01:23:00"`` (The ``"TIME_FORMAT"`` format
+specifier for the ``de`` locale as shipped with Django is ``"H:i:s"``).
+
 When used without a format string::
 
     {{ value|time }}
 
 ...the formatting string defined in the :setting:`TIME_FORMAT` setting will be
-used, without aplying any localization.
+used, without applying any localization.
+
+.. versionchanged:: 1.2
+    Predefined formats can now be influenced by the current locale.
 
 .. templatefilter:: timesince
 
@@ -1684,6 +1818,12 @@ title
 
 Converts a string into titlecase.
 
+For example::
+
+    {{ value|title }}
+
+If ``value`` is ``"my first post"``, the output will be ``"My First Post"``.
+
 .. templatefilter:: truncatewords
 
 truncatewords
@@ -1710,6 +1850,13 @@ closed immediately after the truncation.
 
 This is less efficient than ``truncatewords``, so should only be used when it
 is being passed HTML text.
+
+For example::
+
+    {{ value|truncatewords_html:2 }}
+
+If ``value`` is ``"<p>Joel is a slug</p>"``, the output will be
+``"<p>Joel is ...</p>"``.
 
 .. templatefilter:: unordered_list
 
@@ -1761,6 +1908,13 @@ urlencode
 
 Escapes a value for use in a URL.
 
+For example::
+
+    {{ value|urlencode }}
+
+If ``value`` is ``"http://www.example.org/foo?a=b&c=d"``, the output will be
+``"http%3A//www.example.org/foo%3Fa%3Db%26c%3Dd"``.
+
 .. templatefilter:: urlize
 
 urlize
@@ -1805,6 +1959,12 @@ wordcount
 ~~~~~~~~~
 
 Returns the number of words.
+
+For example::
+
+    {{ value|wordcount }}
+
+If ``value`` is ``"Joel is a slug"``, the output will be ``4``.
 
 .. templatefilter:: wordwrap
 

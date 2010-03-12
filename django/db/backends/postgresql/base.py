@@ -4,6 +4,9 @@ PostgreSQL database backend for Django.
 Requires psycopg 1: http://initd.org/projects/psycopg1
 """
 
+import sys
+
+from django.db import utils
 from django.db.backends import *
 from django.db.backends.signals import connection_created
 from django.db.backends.postgresql.client import DatabaseClient
@@ -50,11 +53,21 @@ class UnicodeCursorWrapper(object):
             return tuple([smart_str(p, self.charset, True) for p in params])
 
     def execute(self, sql, params=()):
-        return self.cursor.execute(smart_str(sql, self.charset), self.format_params(params))
+        try:
+            return self.cursor.execute(smart_str(sql, self.charset), self.format_params(params))
+        except Database.IntegrityError, e:
+            raise utils.IntegrityError, utils.IntegrityError(*tuple(e)), sys.exc_info()[2]
+        except Database.DatabaseError, e:
+            raise utils.DatabaseError, utils.DatabaseError(*tuple(e)), sys.exc_info()[2]
 
     def executemany(self, sql, param_list):
-        new_param_list = [self.format_params(params) for params in param_list]
-        return self.cursor.executemany(sql, new_param_list)
+        try:
+            new_param_list = [self.format_params(params) for params in param_list]
+            return self.cursor.executemany(sql, new_param_list)
+        except Database.IntegrityError, e:
+            raise utils.IntegrityError, utils.IntegrityError(*tuple(e)), sys.exc_info()[2]
+        except Database.DatabaseError, e:
+            raise utils.DatabaseError, utils.DatabaseError(*tuple(e)), sys.exc_info()[2]
 
     def __getattr__(self, attr):
         if attr in self.__dict__:
@@ -89,6 +102,12 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     def __init__(self, *args, **kwargs):
         super(DatabaseWrapper, self).__init__(*args, **kwargs)
 
+        import warnings
+        warnings.warn(
+            'The "postgresql" backend has been deprecated. Use "postgresql_psycopg2" instead.',
+            PendingDeprecationWarning
+        )
+
         self.features = DatabaseFeatures()
         self.ops = DatabaseOperations(self)
         self.client = DatabaseClient(self)
@@ -97,10 +116,12 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         self.validation = BaseDatabaseValidation(self)
 
     def _cursor(self):
+        new_connection = False
         set_tz = False
         settings_dict = self.settings_dict
         if self.connection is None:
-            set_tz = True
+            new_connection = True
+            set_tz = settings_dict.get('TIME_ZONE')
             if settings_dict['NAME'] == '':
                 from django.core.exceptions import ImproperlyConfigured
                 raise ImproperlyConfigured("You need to specify NAME in your Django settings file.")
@@ -117,8 +138,9 @@ class DatabaseWrapper(BaseDatabaseWrapper):
             self.connection.set_isolation_level(1) # make transactions transparent to all cursors
             connection_created.send(sender=self.__class__)
         cursor = self.connection.cursor()
-        if set_tz:
-            cursor.execute("SET TIME ZONE %s", [settings_dict['TIME_ZONE']])
+        if new_connection:
+            if set_tz:
+                cursor.execute("SET TIME ZONE %s", [settings_dict['TIME_ZONE']])
             if not hasattr(self, '_version'):
                 self.__class__._version = get_version(cursor)
             if self._version[0:2] < (8, 0):

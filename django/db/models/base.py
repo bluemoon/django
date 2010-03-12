@@ -10,12 +10,12 @@ from django.db.models.fields.related import OneToOneRel, ManyToOneRel, OneToOneF
 from django.db.models.query import delete_objects, Q
 from django.db.models.query_utils import CollectedObjects, DeferredAttribute
 from django.db.models.options import Options
-from django.db import connections, transaction, DatabaseError, DEFAULT_DB_ALIAS
+from django.db import connections, router, transaction, DatabaseError, DEFAULT_DB_ALIAS
 from django.db.models import signals
 from django.db.models.loading import register_models, get_model
 from django.utils.translation import ugettext_lazy as _
 import django.utils.copycompat as copy
-from django.utils.functional import curry
+from django.utils.functional import curry, update_wrapper
 from django.utils.encoding import smart_str, force_unicode, smart_unicode
 from django.utils.text import get_text_list, capfirst
 from django.conf import settings
@@ -52,10 +52,14 @@ class ModelBase(type):
 
         new_class.add_to_class('_meta', Options(meta, **kwargs))
         if not abstract:
-            new_class.add_to_class('DoesNotExist',
-                    subclass_exception('DoesNotExist', ObjectDoesNotExist, module))
-            new_class.add_to_class('MultipleObjectsReturned',
-                    subclass_exception('MultipleObjectsReturned', MultipleObjectsReturned, module))
+            new_class.add_to_class('DoesNotExist', subclass_exception('DoesNotExist',
+                    tuple(x.DoesNotExist
+                            for x in parents if hasattr(x, '_meta') and not x._meta.abstract)
+                                    or (ObjectDoesNotExist,), module))
+            new_class.add_to_class('MultipleObjectsReturned', subclass_exception('MultipleObjectsReturned',
+                    tuple(x.MultipleObjectsReturned
+                            for x in parents if hasattr(x, '_meta') and not x._meta.abstract)
+                                    or (MultipleObjectsReturned,), module))
             if base_meta and not base_meta.abstract:
                 # Non-abstract child classes inherit some attributes from their
                 # non-abstract parent (unless an ABC comes before it in the
@@ -111,8 +115,7 @@ class ModelBase(type):
                     raise TypeError("Proxy model '%s' has no non-abstract model base class." % name)
             if (new_class._meta.local_fields or
                     new_class._meta.local_many_to_many):
-                raise FieldError("Proxy model '%s' contains model fields."
-                        % name)
+                raise FieldError("Proxy model '%s' contains model fields." % name)
             while base._meta.proxy:
                 base = base._meta.proxy_for_model
             new_class._meta.setup_proxy(base)
@@ -229,7 +232,8 @@ class ModelBase(type):
             cls.__doc__ = "%s(%s)" % (cls.__name__, ", ".join([f.attname for f in opts.fields]))
 
         if hasattr(cls, 'get_absolute_url'):
-            cls.get_absolute_url = curry(get_absolute_url, opts, cls.get_absolute_url)
+            cls.get_absolute_url = update_wrapper(curry(get_absolute_url, opts, cls.get_absolute_url),
+                                                  cls.get_absolute_url)
 
         signals.class_prepared.send(sender=cls)
 
@@ -333,7 +337,7 @@ class Model(object):
                 except AttributeError:
                     pass
             if kwargs:
-                raise TypeError, "'%s' is an invalid keyword argument for this function" % kwargs.keys()[0]
+                raise TypeError("'%s' is an invalid keyword argument for this function" % kwargs.keys()[0])
         signals.post_init.send(sender=self.__class__, instance=self)
 
     def __repr__(self):
@@ -427,8 +431,7 @@ class Model(object):
         non-SQL backends), respectively. Normally, they should not be set.
         """
         if force_insert and force_update:
-            raise ValueError("Cannot force both insert and updating in "
-                    "model saving.")
+            raise ValueError("Cannot force both insert and updating in model saving.")
         self.save_base(using=using, force_insert=force_insert, force_update=force_update)
 
     save.alters_data = True
@@ -441,7 +444,7 @@ class Model(object):
         need for overrides of save() to pass around internal-only parameters
         ('raw', 'cls', and 'origin').
         """
-        using = using or self._state.db or DEFAULT_DB_ALIAS
+        using = using or router.db_for_write(self.__class__, instance=self)
         connection = connections[using]
         assert not (force_insert and force_update)
         if cls is None:
@@ -547,7 +550,8 @@ class Model(object):
              (model_class, {pk_val: obj, pk_val: obj, ...}), ...]
         """
         pk_val = self._get_pk_val()
-        if seen_objs.add(self.__class__, pk_val, self, parent, nullable):
+        if seen_objs.add(self.__class__, pk_val, self,
+                         type(parent), parent, nullable):
             return
 
         for related in self._meta.get_all_related_objects():
@@ -558,7 +562,7 @@ class Model(object):
                 except ObjectDoesNotExist:
                     pass
                 else:
-                    sub_obj._collect_sub_objects(seen_objs, self.__class__, related.field.null)
+                    sub_obj._collect_sub_objects(seen_objs, self, related.field.null)
             else:
                 # To make sure we can access all elements, we can't use the
                 # normal manager on the related object. So we work directly
@@ -576,7 +580,7 @@ class Model(object):
                         continue
                 delete_qs = rel_descriptor.delete_manager(self).all()
                 for sub_obj in delete_qs:
-                    sub_obj._collect_sub_objects(seen_objs, self.__class__, related.field.null)
+                    sub_obj._collect_sub_objects(seen_objs, self, related.field.null)
 
         # Handle any ancestors (for the model-inheritance case). We do this by
         # traversing to the most remote parent classes -- those with no parents
@@ -594,7 +598,7 @@ class Model(object):
             parent_obj._collect_sub_objects(seen_objs)
 
     def delete(self, using=None):
-        using = using or self._state.db or DEFAULT_DB_ALIAS
+        using = using or router.db_for_write(self.__class__, instance=self)
         connection = connections[using]
         assert self._get_pk_val() is not None, "%s object can't be deleted because its %s attribute is set to None." % (self._meta.object_name, self._meta.pk.attname)
 
@@ -621,7 +625,7 @@ class Model(object):
         try:
             return qs[0]
         except IndexError:
-            raise self.DoesNotExist, "%s matching query does not exist." % self.__class__._meta.object_name
+            raise self.DoesNotExist("%s matching query does not exist." % self.__class__._meta.object_name)
 
     def _get_next_or_previous_in_order(self, is_next):
         cachename = "__%s_order_cache" % is_next
@@ -642,38 +646,60 @@ class Model(object):
     def prepare_database_save(self, unused):
         return self.pk
 
-    def validate(self):
+    def clean(self):
         """
         Hook for doing any extra model-wide validation after clean() has been
-        called on every field. Any ValidationError raised by this method will
-        not be associated with a particular field; it will have a special-case
-        association with the field defined by NON_FIELD_ERRORS.
+        called on every field by self.clean_fields. Any ValidationError raised
+        by this method will not be associated with a particular field; it will
+        have a special-case association with the field defined by NON_FIELD_ERRORS.
         """
-        self.validate_unique()
+        pass
 
-    def validate_unique(self):
-        unique_checks, date_checks = self._get_unique_checks()
+    def validate_unique(self, exclude=None):
+        """
+        Checks unique constraints on the model and raises ``ValidationError``
+        if any failed.
+        """
+        unique_checks, date_checks = self._get_unique_checks(exclude=exclude)
 
         errors = self._perform_unique_checks(unique_checks)
         date_errors = self._perform_date_checks(date_checks)
 
         for k, v in date_errors.items():
-             errors.setdefault(k, []).extend(v)
+            errors.setdefault(k, []).extend(v)
 
         if errors:
             raise ValidationError(errors)
 
-    def _get_unique_checks(self):
-        from django.db.models.fields import FieldDoesNotExist, Field as ModelField
+    def _get_unique_checks(self, exclude=None):
+        """
+        Gather a list of checks to perform. Since validate_unique could be
+        called from a ModelForm, some fields may have been excluded; we can't
+        perform a unique check on a model that is missing fields involved
+        in that check.
+        Fields that did not validate should also be exluded, but they need
+        to be passed in via the exclude argument.
+        """
+        if exclude is None:
+            exclude = []
+        unique_checks = []
+        for check in self._meta.unique_together:
+            for name in check:
+                # If this is an excluded field, don't add this check.
+                if name in exclude:
+                    break
+            else:
+                unique_checks.append(tuple(check))
 
-        unique_checks = list(self._meta.unique_together)
-        # these are checks for the unique_for_<date/year/month>
+        # These are checks for the unique_for_<date/year/month>.
         date_checks = []
 
         # Gather a list of checks for fields declared as unique and add them to
-        # the list of checks. Again, skip empty fields and any that did not validate.
+        # the list of checks.
         for f in self._meta.fields:
             name = f.name
+            if name in exclude:
+                continue
             if f.unique:
                 unique_checks.append((name,))
             if f.unique_for_date:
@@ -683,7 +709,6 @@ class Model(object):
             if f.unique_for_month:
                 date_checks.append(('month', name, f.unique_for_month))
         return unique_checks, date_checks
-
 
     def _perform_unique_checks(self, unique_checks):
         errors = {}
@@ -696,11 +721,11 @@ class Model(object):
             for field_name in unique_check:
                 f = self._meta.get_field(field_name)
                 lookup_value = getattr(self, f.attname)
-                if f.null and lookup_value is None:
+                if lookup_value is None:
                     # no value, skip the lookup
                     continue
                 if f.primary_key and not getattr(self, '_adding', False):
-                    # no need to check for unique primary key when editting 
+                    # no need to check for unique primary key when editing
                     continue
                 lookup_kwargs[str(field_name)] = lookup_value
 
@@ -781,33 +806,60 @@ class Model(object):
                 'field_label': unicode(field_labels)
             }
 
-    def full_validate(self, exclude=[]):
+    def full_clean(self, exclude=None):
         """
-        Cleans all fields and raises ValidationError containing message_dict
+        Calls clean_fields, clean, and validate_unique, on the model,
+        and raises a ``ValidationError`` for any errors that occured.
+        """
+        errors = {}
+        if exclude is None:
+            exclude = []
+
+        try:
+            self.clean_fields(exclude=exclude)
+        except ValidationError, e:
+            errors = e.update_error_dict(errors)
+
+        # Form.clean() is run even if other validation fails, so do the
+        # same with Model.clean() for consistency.
+        try:
+            self.clean()
+        except ValidationError, e:
+            errors = e.update_error_dict(errors)
+
+        # Run unique checks, but only for fields that passed validation.
+        for name in errors.keys():
+            if name != NON_FIELD_ERRORS and name not in exclude:
+                exclude.append(name)
+        try:
+            self.validate_unique(exclude=exclude)
+        except ValidationError, e:
+            errors = e.update_error_dict(errors)
+
+        if errors:
+            raise ValidationError(errors)
+
+    def clean_fields(self, exclude=None):
+        """
+        Cleans all fields and raises a ValidationError containing message_dict
         of all validation errors if any occur.
         """
+        if exclude is None:
+            exclude = []
+
         errors = {}
         for f in self._meta.fields:
             if f.name in exclude:
                 continue
+            # Skip validation for empty fields with blank=True. The developer
+            # is responsible for making sure they have a valid value.
+            raw_value = getattr(self, f.attname)
+            if f.blank and raw_value in validators.EMPTY_VALUES:
+                continue
             try:
-                setattr(self, f.attname, f.clean(getattr(self, f.attname), self))
+                setattr(self, f.attname, f.clean(raw_value, self))
             except ValidationError, e:
                 errors[f.name] = e.messages
-
-        # Form.clean() is run even if other validation fails, so do the
-        # same with Model.validate() for consistency.
-        try:
-            self.validate()
-        except ValidationError, e:
-            if hasattr(e, 'message_dict'):
-                if errors:
-                    for k, v in e.message_dict.items():
-                        errors.set_default(k, []).extend(v)
-                else:
-                    errors = e.message_dict
-            else:
-                errors[NON_FIELD_ERRORS] = e.messages
 
         if errors:
             raise ValidationError(errors)
@@ -873,8 +925,8 @@ model_unpickle.__safe_for_unpickle__ = True
 
 if sys.version_info < (2, 5):
     # Prior to Python 2.5, Exception was an old-style class
-    def subclass_exception(name, parent, unused):
-        return types.ClassType(name, (parent,), {})
+    def subclass_exception(name, parents, unused):
+        return types.ClassType(name, parents, {})
 else:
-    def subclass_exception(name, parent, module):
-        return type(name, (parent,), {'__module__': module})
+    def subclass_exception(name, parents, module):
+        return type(name, parents, {'__module__': module})

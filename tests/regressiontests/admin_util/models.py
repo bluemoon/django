@@ -6,6 +6,7 @@ class Article(models.Model):
     """
     A simple Article model for testing
     """
+    site = models.ForeignKey('sites.Site', related_name="admin_articles")
     title = models.CharField(max_length=100)
     title2 = models.CharField(max_length=100, verbose_name="another name")
     created = models.DateTimeField()
@@ -16,3 +17,6 @@ class Article(models.Model):
     def test_from_model_with_override(self):
         return "nothing"
     test_from_model_with_override.short_description = "not what you expect"
+
+class Count(models.Model):
+    num = models.PositiveSmallIntegerField()

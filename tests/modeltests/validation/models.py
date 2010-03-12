@@ -11,14 +11,14 @@ def validate_answer_to_universe(value):
 class ModelToValidate(models.Model):
     name = models.CharField(max_length=100)
     created = models.DateTimeField(default=datetime.now)
-    number = models.IntegerField()
-    parent = models.ForeignKey('self', blank=True, null=True)
+    number = models.IntegerField(db_column='number_val')
+    parent = models.ForeignKey('self', blank=True, null=True, limit_choices_to={'number': 10})
     email = models.EmailField(blank=True)
     url = models.URLField(blank=True)
     f_with_custom_validator = models.IntegerField(blank=True, null=True, validators=[validate_answer_to_universe])
 
-    def validate(self):
-        super(ModelToValidate, self).validate()
+    def clean(self):
+        super(ModelToValidate, self).clean()
         if self.number == 11:
             raise ValidationError('Invalid number supplied!')
 
@@ -36,7 +36,7 @@ class UniqueTogetherModel(models.Model):
     efield = models.EmailField()
 
     class Meta:
-        unique_together = (('ifield', 'cfield',),('ifield', 'efield'), )
+        unique_together = (('ifield', 'cfield',), ['ifield', 'efield'])
 
 class UniqueForDateModel(models.Model):
     start_date = models.DateField()
@@ -47,7 +47,19 @@ class UniqueForDateModel(models.Model):
 
 class CustomMessagesModel(models.Model):
     other  = models.IntegerField(blank=True, null=True)
-    number = models.IntegerField(
+    number = models.IntegerField(db_column='number_val',
         error_messages={'null': 'NULL', 'not42': 'AAARGH', 'not_equal': '%s != me'},
         validators=[validate_answer_to_universe]
     )
+
+class Author(models.Model):
+    name = models.CharField(max_length=100)
+
+class Article(models.Model):
+    title = models.CharField(max_length=100)
+    author = models.ForeignKey(Author)
+    pub_date = models.DateTimeField(blank=True)
+
+    def clean(self):
+        if self.pub_date is None:
+            self.pub_date = datetime.now()

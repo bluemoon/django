@@ -10,6 +10,7 @@ class DeletionTests(TestCase):
         data = {
             'poem_set-TOTAL_FORMS': u'1',
             'poem_set-INITIAL_FORMS': u'1',
+            'poem_set-MAX_NUM_FORMS': u'0',
             'poem_set-0-id': str(poem.pk),
             'poem_set-0-poet': str(poet.pk),
             'poem_set-0-name': u'test',
@@ -30,6 +31,7 @@ class DeletionTests(TestCase):
         data = {
             'poem_set-TOTAL_FORMS': u'1',
             'poem_set-INITIAL_FORMS': u'0',
+            'poem_set-MAX_NUM_FORMS': u'0',
             'poem_set-0-id': u'',
             'poem_set-0-poem': u'1',
             'poem_set-0-name': u'x' * 1000,
@@ -58,6 +60,7 @@ class DeletionTests(TestCase):
         data = {
             'poem_set-TOTAL_FORMS': u'1',
             'poem_set-INITIAL_FORMS': u'1',
+            'poem_set-MAX_NUM_FORMS': u'0',
             'poem_set-0-id': u'1',
             'poem_set-0-poem': u'1',
             'poem_set-0-name': u'x' * 1000,
@@ -81,21 +84,22 @@ class DeletionTests(TestCase):
         regression for #10750
         """
         # exclude some required field from the forms
-        ChildFormSet = inlineformset_factory(School, Child)
+        ChildFormSet = inlineformset_factory(School, Child, exclude=['father', 'mother'])
         school = School.objects.create(name=u'test')
         mother = Parent.objects.create(name=u'mother')
         father = Parent.objects.create(name=u'father')
         data = {
             'child_set-TOTAL_FORMS': u'1',
             'child_set-INITIAL_FORMS': u'0',
+            'child_set-MAX_NUM_FORMS': u'0',
             'child_set-0-name': u'child',
-            'child_set-0-mother': unicode(mother.pk),
-            'child_set-0-father': unicode(father.pk),
         }
         formset = ChildFormSet(data, instance=school)
         self.assertEqual(formset.is_valid(), True)
         objects = formset.save(commit=False)
-        self.assertEqual(school.child_set.count(), 0)
-        objects[0].save()
+        for obj in objects:
+            obj.mother = mother
+            obj.father = father
+            obj.save()
         self.assertEqual(school.child_set.count(), 1)
 

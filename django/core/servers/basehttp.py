@@ -530,7 +530,7 @@ class WSGIServer(HTTPServer):
         try:
             HTTPServer.server_bind(self)
         except Exception, e:
-            raise WSGIServerException, e
+            raise WSGIServerException(e)
         self.setup_environ()
 
     def setup_environ(self):
@@ -619,6 +619,8 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             msg = self.style.HTTP_SUCCESS(msg)
         elif args[1][0] == '1':
             msg = self.style.HTTP_INFO(msg)
+        elif args[1] == '304':
+            msg = self.style.HTTP_NOT_MODIFIED(msg)
         elif args[1][0] == '3':
             msg = self.style.HTTP_REDIRECT(msg)
         elif args[1] == '404':

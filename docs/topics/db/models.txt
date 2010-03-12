@@ -870,6 +870,8 @@ field. This would normally cause a problem in abstract base classes, since the
 fields on this class are included into each of the child classes, with exactly
 the same values for the attributes (including :attr:`~django.db.models.ForeignKey.related_name`) each time.
 
+.. versionchanged:: 1.2
+
 To work around this problem, when you are using :attr:`~django.db.models.ForeignKey.related_name` in an
 abstract base class (only), part of the name should contain
 ``'%(app_label)s'`` and ``'%(class)s'``.
@@ -950,8 +952,8 @@ If you have a ``Place`` that is also a ``Restaurant``, you can get from the
 ``Place`` object to the ``Restaurant`` object by using the lower-case version
 of the model name::
 
-    >>> p = Place.objects.filter(name="Bob's Cafe")
-    # If Bob's Cafe is a Restaurant object, this will give the child class:
+    >>> p = Place.objects.get(id=12)
+    # If p is a Restaurant object, this will give the child class:
     >>> p.restaurant
     <Restaurant: ...>
 

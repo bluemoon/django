@@ -263,6 +263,13 @@ class BaseForm(StrAndUnicode):
         # changed from the initial data, short circuit any validation.
         if self.empty_permitted and not self.has_changed():
             return
+        self._clean_fields()
+        self._clean_form()
+        self._post_clean()
+        if self._errors:
+            delattr(self, 'cleaned_data')
+
+    def _clean_fields(self):
         for name, field in self.fields.items():
             # value_from_datadict() gets the data from the data dictionaries.
             # Each widget type knows how to retrieve its own data, because some
@@ -282,12 +289,19 @@ class BaseForm(StrAndUnicode):
                 self._errors[name] = self.error_class(e.messages)
                 if name in self.cleaned_data:
                     del self.cleaned_data[name]
+
+    def _clean_form(self):
         try:
             self.cleaned_data = self.clean()
         except ValidationError, e:
             self._errors[NON_FIELD_ERRORS] = self.error_class(e.messages)
-        if self._errors:
-            delattr(self, 'cleaned_data')
+
+    def _post_clean(self):
+        """
+        An internal hook for performing additional cleaning after form cleaning
+        is complete. Used for model validation in model forms.
+        """
+        pass
 
     def clean(self):
         """
