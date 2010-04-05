@@ -206,6 +206,7 @@ class ModelAdmin(BaseModelAdmin):
     change_form_template = None
     change_list_template = None
     delete_confirmation_template = None
+    delete_selected_confirmation_template = None
     object_history_template = None
 
     # Actions
@@ -1179,7 +1180,7 @@ class InlineModelAdmin(BaseModelAdmin):
     fk_name = None
     formset = BaseInlineFormSet
     extra = 3
-    max_num = 0
+    max_num = None
     template = None
     verbose_name = None
     verbose_name_plural = None

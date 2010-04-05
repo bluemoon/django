@@ -419,7 +419,8 @@ class ForeignRelatedObjectsDescriptor(object):
 
             def create(self, **kwargs):
                 kwargs.update({rel_field.name: instance})
-                return super(RelatedManager, self).create(**kwargs)
+                db = router.db_for_write(rel_model, instance=instance)
+                return super(RelatedManager, self).using(db).create(**kwargs)
             create.alters_data = True
 
             def get_or_create(self, **kwargs):
@@ -559,6 +560,13 @@ def create_many_related_manager(superclass, rel=False):
                     '%s__in' % target_field_name: new_ids,
                 })
                 new_ids = new_ids - set(vals)
+
+                if self.reverse or source_field_name == self.source_field_name:
+                    # Don't send the signal when we are inserting the
+                    # duplicate data row for symmetrical reverse entries.
+                    signals.m2m_changed.send(sender=rel.through, action='pre_add',
+                        instance=self.instance, reverse=self.reverse,
+                        model=self.model, pk_set=new_ids)
                 # Add the ones that aren't there already
                 for obj_id in new_ids:
                     self.through._default_manager.using(db).create(**{
@@ -568,7 +576,7 @@ def create_many_related_manager(superclass, rel=False):
                 if self.reverse or source_field_name == self.source_field_name:
                     # Don't send the signal when we are inserting the
                     # duplicate data row for symmetrical reverse entries.
-                    signals.m2m_changed.send(sender=rel.through, action='add',
+                    signals.m2m_changed.send(sender=rel.through, action='post_add',
                         instance=self.instance, reverse=self.reverse,
                         model=self.model, pk_set=new_ids)
 
@@ -586,6 +594,12 @@ def create_many_related_manager(superclass, rel=False):
                         old_ids.add(obj.pk)
                     else:
                         old_ids.add(obj)
+                if self.reverse or source_field_name == self.source_field_name:
+                    # Don't send the signal when we are deleting the
+                    # duplicate data row for symmetrical reverse entries.
+                    signals.m2m_changed.send(sender=rel.through, action="pre_remove",
+                        instance=self.instance, reverse=self.reverse,
+                        model=self.model, pk_set=old_ids)
                 # Remove the specified objects from the join table
                 db = router.db_for_write(self.through.__class__, instance=self.instance)
                 self.through._default_manager.using(db).filter(**{
@@ -595,7 +609,7 @@ def create_many_related_manager(superclass, rel=False):
                 if self.reverse or source_field_name == self.source_field_name:
                     # Don't send the signal when we are deleting the
                     # duplicate data row for symmetrical reverse entries.
-                    signals.m2m_changed.send(sender=rel.through, action="remove",
+                    signals.m2m_changed.send(sender=rel.through, action="post_remove",
                         instance=self.instance, reverse=self.reverse,
                         model=self.model, pk_set=old_ids)
 
@@ -604,13 +618,19 @@ def create_many_related_manager(superclass, rel=False):
             if self.reverse or source_field_name == self.source_field_name:
                 # Don't send the signal when we are clearing the
                 # duplicate data rows for symmetrical reverse entries.
-                signals.m2m_changed.send(sender=rel.through, action="clear",
+                signals.m2m_changed.send(sender=rel.through, action="pre_clear",
                     instance=self.instance, reverse=self.reverse,
                     model=self.model, pk_set=None)
             db = router.db_for_write(self.through.__class__, instance=self.instance)
             self.through._default_manager.using(db).filter(**{
                 source_field_name: self._pk_val
             }).delete()
+            if self.reverse or source_field_name == self.source_field_name:
+                # Don't send the signal when we are clearing the
+                # duplicate data rows for symmetrical reverse entries.
+                signals.m2m_changed.send(sender=rel.through, action="post_clear",
+                    instance=self.instance, reverse=self.reverse,
+                    model=self.model, pk_set=None)
 
     return ManyRelatedManager
 
@@ -690,7 +710,7 @@ class ReverseManyRelatedObjectsDescriptor(object):
             model=rel_model,
             core_filters={'%s__pk' % self.field.related_query_name(): instance._get_pk_val()},
             instance=instance,
-            symmetrical=(self.field.rel.symmetrical and isinstance(instance, rel_model)),
+            symmetrical=self.field.rel.symmetrical,
             source_field_name=self.field.m2m_field_name(),
             target_field_name=self.field.m2m_reverse_field_name(),
             reverse=False
@@ -971,7 +991,7 @@ class ManyToManyField(RelatedField, Field):
         kwargs['rel'] = ManyToManyRel(to,
             related_name=kwargs.pop('related_name', None),
             limit_choices_to=kwargs.pop('limit_choices_to', None),
-            symmetrical=kwargs.pop('symmetrical', True),
+            symmetrical=kwargs.pop('symmetrical', to==RECURSIVE_RELATIONSHIP_CONSTANT),
             through=kwargs.pop('through', None))
 
         self.db_table = kwargs.pop('db_table', None)

@@ -32,8 +32,9 @@
 		};
 		var totalForms = $("#id_" + options.prefix + "-TOTAL_FORMS").attr("autocomplete", "off");
 		var maxForms = $("#id_" + options.prefix + "-MAX_NUM_FORMS").attr("autocomplete", "off");
-		// only show the add button if we are allowed to add more items
-		var showAddButton = ((maxForms.val() == 0) || ((maxForms.val()-totalForms.val()) > 0));
+		// only show the add button if we are allowed to add more items,
+        // note that max_num = None translates to a blank string.
+		var showAddButton = maxForms.val() == '' || (maxForms.val()-totalForms.val()) > 0;
 		$(this).each(function(i) {
 			$(this).not("." + options.emptyCssClass).addClass(options.formCssClass);
 		});
@@ -52,12 +53,12 @@
 			}
 			addButton.click(function() {
 				var totalForms = $("#id_" + options.prefix + "-TOTAL_FORMS");
-				var nextIndex = parseInt(totalForms.val()) + 1;
+				var nextIndex = parseInt(totalForms.val());
 				var template = $("#" + options.prefix + "-empty");
 				var row = template.clone(true).get(0);
 				$(row).removeClass(options.emptyCssClass).removeAttr("id").insertBefore($(template));
 				$(row).html($(row).html().replace(/__prefix__/g, nextIndex));
-				$(row).addClass(options.formCssClass).attr("id", options.prefix + nextIndex);
+				$(row).addClass(options.formCssClass).attr("id", options.prefix + (nextIndex + 1));
 				if ($(row).is("TR")) {
 					// If the forms are laid out in table rows, insert
 					// the remove button into the last table cell:
@@ -75,9 +76,9 @@
 					updateElementIndex(this, options.prefix, totalForms.val());
 				});
 				// Update number of total forms
-				$(totalForms).val(nextIndex);
+				$(totalForms).val(nextIndex + 1);
 				// Hide add button in case we've hit the max, except we want to add infinitely
-				if ((maxForms.val() != 0) && (maxForms.val() <= totalForms.val())) {
+				if ((maxForms.val() != '') && (maxForms.val() <= totalForms.val())) {
 					addButton.parent().hide();
 				}
 				// The delete button of each row triggers a bunch of other things
@@ -93,7 +94,7 @@
 					var forms = $("." + options.formCssClass);
 					$("#id_" + options.prefix + "-TOTAL_FORMS").val(forms.length);
 					// Show add button again once we drop below max
-					if ((maxForms.val() == 0) || (maxForms.val() >= forms.length)) {
+					if ((maxForms.val() == '') || (maxForms.val() >= forms.length)) {
 						addButton.parent().show();
 					}
 					// Also, update names and ids for all remaining form controls
