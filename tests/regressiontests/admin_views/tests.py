@@ -1956,7 +1956,7 @@ class ReadonlyTest(TestCase):
         self.assertNotContains(response, 'name="posted"')
         # 3 fields + 2 submit buttons + 4 inline management form fields, + 2
         # hidden fields for inlines + 1 field for the inline + 2 empty form
-        self.assertEqual(response.content.count("input"), 14)
+        self.assertEqual(response.content.count("<input"), 14)
         self.assertContains(response, formats.localize(datetime.date.today()))
         self.assertContains(response,
             "<label>Awesomeness level:</label>")
@@ -1970,6 +1970,7 @@ class ReadonlyTest(TestCase):
         self.assertContains(response, '<div class="form-row coolness">')
         self.assertContains(response, '<div class="form-row awesomeness_level">')
         self.assertContains(response, '<div class="form-row posted">')
+        self.assertContains(response, '<div class="form-row value">')
         self.assertContains(response, '<div class="form-row ">')
 
         p = Post.objects.create(title="I worked on readonly_fields", content="Its good stuff")
