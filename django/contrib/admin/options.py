@@ -271,10 +271,10 @@ class ModelAdmin(BaseModelAdmin):
 
         js = ['js/core.js', 'js/admin/RelatedObjectLookups.js']
         if self.actions is not None:
-            js.extend(['js/jquery.min.js', 'js/actions.min.js'])
+            js.extend(['js/jquery.min.js', 'js/jquery.init.js', 'js/actions.min.js'])
         if self.prepopulated_fields:
             js.append('js/urlify.js')
-            js.append('js/prepopulate.js')
+            js.append('js/prepopulate.min.js')
         if self.opts.get_ordered_objects():
             js.extend(['js/getElementsBySelector.js', 'js/dom-drag.js' , 'js/admin/ordering.js'])
 
@@ -1035,14 +1035,12 @@ class ModelAdmin(BaseModelAdmin):
         else:
             action_form = None
 
-        selection_note = ungettext('of %(count)d selected',
-            'of %(count)d selected', len(cl.result_list))
         selection_note_all = ungettext('%(total_count)s selected',
             'All %(total_count)s selected', cl.result_count)
 
         context = {
             'module_name': force_unicode(opts.verbose_name_plural),
-            'selection_note': selection_note % {'count': len(cl.result_list)},
+            'selection_note': _('0 of %(cnt)s selected') % {'cnt': len(cl.result_list)},
             'selection_note_all': selection_note_all % {'total_count': cl.result_count},
             'title': cl.title,
             'is_popup': cl.is_popup,
@@ -1199,10 +1197,10 @@ class InlineModelAdmin(BaseModelAdmin):
 
     def _media(self):
         from django.conf import settings
-        js = ['js/jquery.min.js', 'js/inlines.min.js']
+        js = ['js/jquery.min.js', 'js/jquery.init.js', 'js/inlines.min.js']
         if self.prepopulated_fields:
             js.append('js/urlify.js')
-            js.append('js/prepopulate.js')
+            js.append('js/prepopulate.min.js')
         if self.filter_vertical or self.filter_horizontal:
             js.extend(['js/SelectBox.js' , 'js/SelectFilter2.js'])
         return forms.Media(js=['%s%s' % (settings.ADMIN_MEDIA_PREFIX, url) for url in js])
