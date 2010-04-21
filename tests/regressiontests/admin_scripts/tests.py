@@ -967,7 +967,7 @@ class ManageValidate(AdminScriptTestCase):
         args = ['validate']
         out, err = self.run_manage(args)
         self.assertNoOutput(out)
-        self.assertOutput(err, 'No module named admin_scriptz.broken_app')
+        self.assertOutput(err, 'No module named admin_scriptz')
 
     def test_broken_app(self):
         "manage.py validate reports an ImportError if an app's models.py raises one on import"
@@ -987,6 +987,15 @@ class ManageValidate(AdminScriptTestCase):
         self.assertNoOutput(err)
         self.assertOutput(out, '0 errors found')
 
+    def test_app_with_import(self):
+        "manage.py validate does not raise errors when an app imports a base class that itself has an abstract base"
+        self.write_settings('settings.py',
+            apps=['admin_scripts.app_with_import', 'django.contrib.comments'],
+            sdict={'DEBUG': True})
+        args = ['validate']
+        out, err = self.run_manage(args)
+        self.assertNoOutput(err)
+        self.assertOutput(out, '0 errors found')
 
 ##########################################################################
 # COMMAND PROCESSING TESTS
