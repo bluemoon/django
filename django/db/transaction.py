@@ -11,6 +11,7 @@ called, a commit is made.
 Managed transactions don't do those commits, but will need some kind of manual
 or implicit commits or rollbacks.
 """
+import sys
 
 try:
     import thread
@@ -20,8 +21,9 @@ try:
     from functools import wraps
 except ImportError:
     from django.utils.functional import wraps  # Python 2.4 fallback.
-from django.db import connections, DEFAULT_DB_ALIAS
+
 from django.conf import settings
+from django.db import connections, DEFAULT_DB_ALIAS
 
 class TransactionManagementError(Exception):
     """
@@ -257,31 +259,57 @@ def savepoint_commit(sid, using=None):
 # DECORATORS #
 ##############
 
-def autocommit(using=None):
-    """
-    Decorator that activates commit on save. This is Django's default behavior;
-    this decorator is useful if you globally activated transaction management in
-    your settings file and want the default behavior in some view functions.
-    """
-    def inner_autocommit(func, db=None):
-        def _autocommit(*args, **kw):
+class Transaction(object):
+    def __init__(self, entering, exiting, using):
+        self.entering = entering
+        self.exiting = exiting
+        self.using = using
+    
+    def __enter__(self):
+        self.entering(self.using)
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.exiting(exc_value, self.using)
+    
+    def __call__(self, func):
+        @wraps(func)
+        def inner(*args, **kwargs):
+            self.__enter__()
             try:
-                enter_transaction_management(managed=False, using=db)
-                managed(False, using=db)
-                return func(*args, **kw)
-            finally:
-                leave_transaction_management(using=db)
-        return wraps(func)(_autocommit)
+                res = func(*args, **kwargs)
+            except:
+                self.__exit__(*sys.exc_info())
+                raise
+            else:
+                self.__exit__(None, None, None)
+                return res
+        return inner
 
+def _transaction_func(entering, exiting, using):
     # Note that although the first argument is *called* `using`, it
     # may actually be a function; @autocommit and @autocommit('foo')
     # are both allowed forms.
     if using is None:
         using = DEFAULT_DB_ALIAS
     if callable(using):
-        return inner_autocommit(using, DEFAULT_DB_ALIAS)
-    return lambda func: inner_autocommit(func,  using)
+        return Transaction(entering, exiting, DEFAULT_DB_ALIAS)(using)
+    return Transaction(entering, exiting, using)
 
+
+def autocommit(using=None):
+    """
+    Decorator that activates commit on save. This is Django's default behavior;
+    this decorator is useful if you globally activated transaction management in
+    your settings file and want the default behavior in some view functions.
+    """
+    def entering(using):
+        enter_transaction_management(managed=False, using=using)
+        managed(False, using=using)
+    
+    def exiting(exc_value, using):
+        leave_transaction_management(using=using)
+    
+    return _transaction_func(entering, exiting, using)
 
 def commit_on_success(using=None):
     """
@@ -290,38 +318,23 @@ def commit_on_success(using=None):
     a rollback is made. This is one of the most common ways to do transaction
     control in web apps.
     """
-    def inner_commit_on_success(func, db=None):
-        def _commit_on_success(*args, **kw):
-            try:
-                enter_transaction_management(using=db)
-                managed(True, using=db)
+    def entering(using):
+        enter_transaction_management(using=using)
+        managed(True, using=using)
+    
+    def exiting(exc_value, using):
+        if exc_value is not None:
+            if is_dirty(using=using):
+                rollback(using=using)
+        else:
+            if is_dirty(using=using):
                 try:
-                    res = func(*args, **kw)
+                    commit(using=using)
                 except:
-                    # All exceptions must be handled here (even string ones).
-                    if is_dirty(using=db):
-                        rollback(using=db)
+                    rollback(using=using)
                     raise
-                else:
-                    if is_dirty(using=db):
-                        try:
-                            commit(using=db)
-                        except:
-                            rollback(using=db)
-                            raise
-                return res
-            finally:
-                leave_transaction_management(using=db)
-        return wraps(func)(_commit_on_success)
-
-    # Note that although the first argument is *called* `using`, it
-    # may actually be a function; @autocommit and @autocommit('foo')
-    # are both allowed forms.
-    if using is None:
-        using = DEFAULT_DB_ALIAS
-    if callable(using):
-        return inner_commit_on_success(using, DEFAULT_DB_ALIAS)
-    return lambda func: inner_commit_on_success(func, using)
+    
+    return _transaction_func(entering, exiting, using)
 
 def commit_manually(using=None):
     """
@@ -330,22 +343,11 @@ def commit_manually(using=None):
     own -- it's up to the user to call the commit and rollback functions
     themselves.
     """
-    def inner_commit_manually(func, db=None):
-        def _commit_manually(*args, **kw):
-            try:
-                enter_transaction_management(using=db)
-                managed(True, using=db)
-                return func(*args, **kw)
-            finally:
-                leave_transaction_management(using=db)
-
-        return wraps(func)(_commit_manually)
-
-    # Note that although the first argument is *called* `using`, it
-    # may actually be a function; @autocommit and @autocommit('foo')
-    # are both allowed forms.
-    if using is None:
-        using = DEFAULT_DB_ALIAS
-    if callable(using):
-        return inner_commit_manually(using, DEFAULT_DB_ALIAS)
-    return lambda func: inner_commit_manually(func, using)
+    def entering(using):
+        enter_transaction_management(using=using)
+        managed(True, using=using)
+    
+    def exiting(exc_value, using):
+        leave_transaction_management(using=using)
+    
+    return _transaction_func(entering, exiting, using)

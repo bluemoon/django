@@ -63,6 +63,9 @@ parameter which should be the alias for a database connection for which the
 behavior applies to.  If no alias is specified then the ``"default"`` database
 is used.
 
+In addition, all of these decorators can be used as a context manager with
+Python 2.5 and above.
+
 .. note::
 
     Although the examples below use view functions as examples, these
