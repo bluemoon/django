@@ -31,3 +31,17 @@ class Post(models.Model):
     magic_numbers = models.ListField(
         models.IntegerField()
     )
+
+
+class Revision(models.Model):
+    number = models.IntegerField()
+    content = models.TextField()
+
+
+class WikiPage(models.Model):
+    id = models.NativeAutoField(primary_key=True)
+    title = models.CharField(max_length=255)
+    
+    revisions = models.ListField(
+        models.EmbeddedModel(Revision)
+    )
