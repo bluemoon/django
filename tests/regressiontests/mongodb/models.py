@@ -38,6 +38,12 @@ class Revision(models.Model):
     content = models.TextField()
 
 
+class AuthenticatedRevision(Revision):
+    # This is a really stupid way to add optional authentication, but it serves
+    # its purpose.
+    author = models.CharField(max_length=100)
+
+
 class WikiPage(models.Model):
     id = models.NativeAutoField(primary_key=True)
     title = models.CharField(max_length=255)

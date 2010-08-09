@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db.models.fields import Field
 from django.db.models.fields.subclassing import SubfieldBase
 
@@ -24,6 +25,10 @@ class ListField(Field):
         )
     
     def to_python(self, value):
+        try:
+            value = iter(value)
+        except TypeError:
+            raise ValidationError("Value should be iterable")
         return [
             self.field_type.to_python(v)
             for v in value
@@ -40,8 +45,16 @@ class EmbeddedModel(Field):
     def get_db_prep_save(self, value, connection):
         data = {}
         for field in self.to._meta.fields:
-            data[field.column] = field.get_db_prep_save(getattr(value, field.name), connection=connection)
+            data[field.column] = field.get_db_prep_save(
+                getattr(value, field.name), connection=connection
+            )
         return data
     
     def to_python(self, value):
+        if isinstance(value, self.to):
+            return value
+        try:
+            value = dict(value)
+        except TypeError:
+            raise ValidationError("Value should be a dict")
         return self.to(**value)

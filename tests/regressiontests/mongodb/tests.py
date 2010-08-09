@@ -3,7 +3,7 @@ from django.db import connection, UnsupportedDatabaseOperation
 from django.db.models import Count, Sum, F, Q
 from django.test import TestCase
 
-from models import Artist, Group, Post, WikiPage, Revision
+from models import Artist, Group, Post, WikiPage, Revision, AuthenticatedRevision
 
 
 class MongoTestCase(TestCase):
@@ -472,3 +472,24 @@ class MongoTestCase(TestCase):
         )
         
         self.assertEqual(Revision.objects.count(), 0)
+        
+        self.assertRaises(ValidationError,
+            lambda: WikiPage.objects.create(title="Python", revisions=14)
+        )
+        self.assertRaises(ValidationError,
+            lambda: WikiPage.objects.create(title="Python", revisions=[14])
+        )
+        
+        page = WikiPage.objects.create(title="Python", revisions=[
+            Revision(number=1, content="Python was created by Guido van Rossum.")
+        ])
+        page = WikiPage.objects.get(pk=page.pk)
+        self.assertEqual(len(page.revisions), 1)
+        
+        page.revisions.append(
+            AuthenticatedRevision(number=2, content="Python is a trap.", author="Rasmus Lerdorf"),
+        )
+        
+        page.save()
+        self.assertEqual(len(page.revisions), 2)
+        self.assertEqual(page.revisions[-1].author, "Rasmus Lerdorf")
