@@ -493,3 +493,8 @@ class MongoTestCase(TestCase):
         page.save()
         self.assertEqual(len(page.revisions), 2)
         self.assertEqual(page.revisions[-1].author, "Rasmus Lerdorf")
+        
+        page = WikiPage.objects.get(pk=page.pk)
+        self.assertEqual(len(page.revisions), 2)
+        self.assertTrue(isinstance(page.revisions[-1], AuthenticatedRevision))
+        self.assertEqual(page.revisions[-1].author, "Rasmus Lerdorf")
