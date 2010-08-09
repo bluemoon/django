@@ -498,3 +498,6 @@ class MongoTestCase(TestCase):
         self.assertEqual(len(page.revisions), 2)
         self.assertTrue(isinstance(page.revisions[-1], AuthenticatedRevision))
         self.assertEqual(page.revisions[-1].author, "Rasmus Lerdorf")
+        
+        page.revisions.append(14)
+        self.assertRaises(ValidationError, page.save)

@@ -45,6 +45,9 @@ class EmbeddedModel(Field):
     
     def get_db_prep_save(self, value, connection):
         data = {}
+        if not isinstance(value, self.to):
+            raise ValidationError("Value must be an instance of %s, got %s "
+                "instead" % (self.to, value))
         if type(value) is not self.to:
             data["_cls"] = (value._meta.app_label, value._meta.object_name)
         for field in value._meta.fields:
